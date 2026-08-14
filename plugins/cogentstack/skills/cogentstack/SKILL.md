@@ -1,11 +1,11 @@
 ---
 name: cogentstack
-description: Open the hosted CogentStack workspace and securely authorize ChatGPT Desktop when requested. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to open the CogentStack workspace, or asks to sign in to CogentStack from Desktop.
+description: Open the hosted CogentStack workspace, securely authorize ChatGPT Desktop, and create an explicitly approved requested project. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to open the CogentStack workspace, asks to sign in to CogentStack from Desktop, or says create requested project.
 ---
 
 # Use CogentStack
 
-CogentStack's public plugin is deliberately limited to launching the hosted workspace and running the small Desktop device-authorization client. It does not distribute contracts, task blueprints, compatibility rules, project generators, licence validation logic, or Git orchestration.
+CogentStack's public plugin launches the hosted workspace, runs the small Desktop device-authorization client, and fulfils project requests that the user explicitly approved there. It does not distribute contracts, task blueprints, compatibility rules, licence validation logic, or a local project generator. The protected server produces a request-bound project artifact; Desktop verifies and writes only that artifact.
 
 1. Installation and workspace browsing are public. Do not request a CogentStack account, licence key, activation code, or Desktop credential during installation or launch.
 2. When the user invokes CogentStack or asks to open it, run `scripts/ensure-cogentstack.ps1`.
@@ -13,8 +13,8 @@ CogentStack's public plugin is deliberately limited to launching the hosted work
 4. On Windows, run `scripts/hide-codex-sidebar.ps1` after opening so the hosted workspace has room beside the conversation.
 5. Authentication and licence validation begin only when the user chooses **Use [project type] contract** in the hosted workspace.
 6. Treat the hosted workspace as authoritative. Do not infer, recreate, cache, or disclose proprietary contract content, project-generation rules, subscriber credentials, or protected service responses.
-7. Contract activation, validation, and next-action decisions are executed by CogentStack's protected server-side Contract Runtime. Never request or download a complete contract, task blueprint, acceptance map, or Contract Pack. Consume only the narrow result presented by the hosted workspace.
-8. For filesystem, terminal, or Git work, use Codex's normal built-in capabilities only when the user explicitly requests that work. This launcher does not grant extra authority and must not imply that a hosted selection alone authorizes local changes.
+7. Contract activation, validation, project-artifact generation, and next-action decisions are executed by CogentStack's protected server-side Contract Runtime. Never request or download a complete contract, task blueprint, or Contract Pack. Consume only the narrow result presented by the hosted workspace or the request-bound generated files returned to the fulfilment helper.
+8. A hosted selection alone does not authorize local changes. Local project creation is allowed only after the user approves the exact target directory and submits a project request in the hosted workspace, then explicitly asks Desktop to create that requested project.
 
 ## Sign in from ChatGPT Desktop
 
@@ -28,5 +28,16 @@ When the user explicitly asks to sign in, log in, connect their CogentStack acco
 6. The encrypted Desktop credential remains bound to the current Windows user through DPAPI. Never read, decrypt, display, or transmit it except through this script and CogentStack's protected API flow.
 
 When the user explicitly asks to sign out or disconnect ChatGPT Desktop, run `scripts/connect-cogentstack.ps1 -Mode disconnect`. This revokes the server token before removing the encrypted local credential. Browser sessions remain separately controllable from the CogentStack account page.
+
+## Create an approved requested project
+
+When the user says **create requested project**, asks CogentStack to create the project they approved, or otherwise explicitly requests fulfilment:
+
+1. Run `scripts/fulfil-project.ps1 -Mode inspect`. It uses the current user's DPAPI-protected Desktop credential internally and returns only narrow project-request summaries.
+2. If no request is available, explain that the user must finish and approve Step 2 in the hosted workspace. If more than one request is available and the user did not identify one, show the project names and exact target paths and ask which request to create.
+3. Run `scripts/fulfil-project.ps1 -Mode create -RequestId <approved UUID>` for the one selected request. When there is exactly one request, `-RequestId` may be omitted.
+4. The helper must keep the Desktop token, execution grant, and raw server artifact private. Never print, summarize, cache, or reproduce them. Do not substitute local templates, infer missing contract content, or bypass artifact checks.
+5. The helper writes only beneath the server-returned target path, verifies every file and the whole artifact, installs dependencies, runs the generated acceptance tests, creates the initial Git baseline, and reports completion to the server. If it fails, do not delete the partial target; report its path and the failure clearly.
+6. On success, report the exact target path, passed tests, and baseline commit. Project creation does not authorize pushing, deploying, or changing any other repository.
 
 After opening the workspace, display a brief welcome explaining that Project Types can be browsed freely and that sign-in or a licence is requested only when a contract is used.
