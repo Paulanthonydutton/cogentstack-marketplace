@@ -1,0 +1,4 @@
+interface:
+  display_name: "CogentStack"
+  short_description: "Open the protected CogentStack workspace"
+  default_prompt: "Use $cogentstack to open the CogentStack workspace."
