@@ -1,7 +1,7 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260814220610",
-  "description": "Open CogentStack, securely authorize ChatGPT Desktop, and create explicitly approved server-generated projects without distributing proprietary contract logic.",
+  "version": "0.4.0+codex.20260814215849",
+  "description": "Open CogentStack, securely authorize ChatGPT Desktop, and turn adjacent-composer briefs into explicitly approved server-generated projects without distributing proprietary contract logic.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
   "author": {
@@ -15,8 +15,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "CogentStack",
-    "shortDescription": "Open CogentStack, connect Desktop, and create approved projects.",
-    "longDescription": "CogentStack opens the hosted workspace at cogentstack.app, supports user-approved Desktop authorization, and fulfils explicitly approved project requests through verified server-generated artifacts. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
+    "shortDescription": "Open CogentStack and build from your project brief.",
+    "longDescription": "CogentStack opens the hosted workspace at cogentstack.app, supports user-approved Desktop authorization, and turns natural-language briefs written in the adjacent Codex composer into explicitly approved projects through verified server-generated artifacts. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
     "developerName": "Paula",
     "category": "Productivity",
     "capabilities": [
@@ -26,7 +26,7 @@
     "defaultPrompt": [
       "Open the CogentStack workspace.",
       "Sign in to CogentStack from Desktop.",
-      "Create the approved requested project."
+      "Build the approved project I describe in this composer."
     ],
     "brandColor": "#087E6D",
     "composerIcon": "./assets/icon.png",
