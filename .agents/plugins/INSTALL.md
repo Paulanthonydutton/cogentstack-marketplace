@@ -7,7 +7,7 @@ Carry out these steps for the user. Do not ask the user to run technical checks 
 3. If the `cogentstack` marketplace is already registered, confirm its Git source and both sparse paths match this document. Refresh it before installation. If its registration differs, remove only that marketplace registration and add it again with the correct source and sparse paths.
 4. Install `cogentstack@cogentstack`.
 5. Verify that the plugin is installed and enabled, and that its installed version matches the version declared by the refreshed marketplace package.
-6. Verify that the installed package contains only its manifest, brand assets, launcher skill, presentation metadata, `ensure-cogentstack.ps1`, and `hide-codex-sidebar.ps1`. Stop if it contains contract, project-generation, subscriber-credential, filesystem, runtime-sync, or Git-orchestration code.
+6. Verify that the installed package contains only its manifest, brand assets, launcher skill, presentation metadata, `ensure-cogentstack.ps1`, `connect-cogentstack.ps1`, and `hide-codex-sidebar.ps1`. The connection helper may use Windows DPAPI for the current user's Desktop credential, but it must not contain licence-validation rules, contracts, project-generation, runtime-sync, or Git-orchestration code.
 7. Verify that the installed CogentStack launcher opens exactly `https://cogentstack.app/stack` and does not require first-install activation. Do not launch CogentStack as part of installation.
 
 If any verification fails, stop and clearly explain the problem. Do not report a successful installation or substitute an older route or package.

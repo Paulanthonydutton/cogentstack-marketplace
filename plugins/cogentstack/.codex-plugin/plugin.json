@@ -1,7 +1,7 @@
 {
   "name": "cogentstack",
-  "version": "0.2.0+codex.20260814052556",
-  "description": "Open the hosted CogentStack workspace without distributing proprietary contract or project-generation code.",
+  "version": "0.3.0+codex.20260814125517",
+  "description": "Open the hosted CogentStack workspace and securely authorize ChatGPT Desktop without distributing proprietary contract or project-generation code.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
   "author": {
@@ -15,8 +15,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "CogentStack",
-    "shortDescription": "Open the protected CogentStack workspace.",
-    "longDescription": "CogentStack opens the hosted workspace at cogentstack.app. Project Type Contracts, blueprints, compatibility rules, project-generation logic, and subscriber data remain on the protected CogentStack service.",
+    "shortDescription": "Open CogentStack and securely authorize Desktop.",
+    "longDescription": "CogentStack opens the hosted workspace at cogentstack.app and supports user-approved Desktop authorization. Project Type Contracts, blueprints, compatibility rules, project-generation logic, licence validation, and subscriber data remain on the protected CogentStack service.",
     "developerName": "Paula",
     "category": "Productivity",
     "capabilities": [
@@ -24,7 +24,8 @@
     ],
     "websiteURL": "https://cogentstack.app/",
     "defaultPrompt": [
-      "Open the CogentStack workspace."
+      "Open the CogentStack workspace.",
+      "Sign in to CogentStack from Desktop."
     ],
     "brandColor": "#087E6D",
     "composerIcon": "./assets/icon.png",
