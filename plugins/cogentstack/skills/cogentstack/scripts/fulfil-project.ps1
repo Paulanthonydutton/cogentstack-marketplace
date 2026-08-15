@@ -6,6 +6,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'native-command.ps1')
 
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     try {
@@ -200,26 +201,40 @@ try {
         [IO.File]::WriteAllBytes($destination, [Convert]::FromBase64String([string]$file.contentBase64))
     }
 
-    $installOutput = & npm.cmd ci --prefer-offline --no-audit --no-fund --prefix $targetPath 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-        throw "Dependency installation failed: $($installOutput.Trim())"
+    $installResult = Invoke-CogentStackNativeCommand -FilePath 'npm.cmd' -ArgumentList @(
+        'ci', '--prefer-offline', '--no-audit', '--no-fund', '--prefix', $targetPath
+    )
+    if ($installResult.ExitCode -ne 0) {
+        throw "Dependency installation failed: $($installResult.Output)"
     }
-    $testOutput = & npm.cmd test --prefix $targetPath 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-        throw "Project acceptance tests failed: $($testOutput.Trim())"
+    $testResult = Invoke-CogentStackNativeCommand -FilePath 'npm.cmd' -ArgumentList @(
+        'test', '--prefix', $targetPath
+    )
+    if ($testResult.ExitCode -ne 0) {
+        throw "Project acceptance tests failed: $($testResult.Output)"
     }
 
-    & git -C $targetPath init --quiet
-    if ($LASTEXITCODE -ne 0) { throw 'Git initialization failed.' }
-    & git -C $targetPath add -A
-    if ($LASTEXITCODE -ne 0) { throw 'Git staging failed.' }
-    $gitName = (& git -C $targetPath config user.name 2>$null | Out-String).Trim()
-    if (-not $gitName) { & git -C $targetPath config user.name 'CogentStack Desktop' }
-    $gitEmail = (& git -C $targetPath config user.email 2>$null | Out-String).Trim()
-    if (-not $gitEmail) { & git -C $targetPath config user.email 'desktop@cogentstack.local' }
-    & git -C $targetPath commit --quiet -m 'Initialize CogentStack project foundation'
-    if ($LASTEXITCODE -ne 0) { throw 'Git baseline commit failed.' }
-    $commit = (& git -C $targetPath rev-parse HEAD).Trim()
+    $gitInitResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'init', '--quiet')
+    if ($gitInitResult.ExitCode -ne 0) { throw 'Git initialization failed.' }
+    $gitAddResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'add', '-A')
+    if ($gitAddResult.ExitCode -ne 0) { throw 'Git staging failed.' }
+
+    $gitNameResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.name')
+    if ($gitNameResult.ExitCode -ne 0 -or -not $gitNameResult.Output) {
+        $gitSetNameResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.name', 'CogentStack Desktop')
+        if ($gitSetNameResult.ExitCode -ne 0) { throw 'Git identity configuration failed.' }
+    }
+    $gitEmailResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.email')
+    if ($gitEmailResult.ExitCode -ne 0 -or -not $gitEmailResult.Output) {
+        $gitSetEmailResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.email', 'desktop@cogentstack.local')
+        if ($gitSetEmailResult.ExitCode -ne 0) { throw 'Git identity configuration failed.' }
+    }
+
+    $gitCommitResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'commit', '--quiet', '-m', 'Initialize CogentStack project foundation')
+    if ($gitCommitResult.ExitCode -ne 0) { throw 'Git baseline commit failed.' }
+    $gitRevisionResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'rev-parse', 'HEAD')
+    if ($gitRevisionResult.ExitCode -ne 0 -or -not $gitRevisionResult.Output) { throw 'Git baseline revision could not be read.' }
+    $commit = $gitRevisionResult.Output
 
     $completed = Invoke-CogentStackApi -Method Patch -Path '/api/plugin/project-requests' -Token $token -Body @{
         action = 'complete'
