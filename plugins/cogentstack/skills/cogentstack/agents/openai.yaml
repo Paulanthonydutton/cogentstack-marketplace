@@ -1,4 +1,4 @@
 interface:
   display_name: "CogentStack"
-  short_description: "Open CogentStack and build from your brief"
-  default_prompt: "Use $cogentstack to build the approved project I describe in this composer."
+  short_description: "Open, build, and safely manage projects"
+  default_prompt: "Use $cogentstack to open, build, or safely manage my approved CogentStack project."

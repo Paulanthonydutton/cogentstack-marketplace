@@ -1,6 +1,6 @@
 ---
 name: cogentstack
-description: Open the hosted CogentStack workspace, securely authorize ChatGPT Desktop, and turn a natural-language project brief into an explicitly approved project. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to open the CogentStack workspace, asks to sign in to CogentStack from Desktop, or describes a project they want CogentStack to create after approving its setup in the hosted workspace.
+description: Open the hosted CogentStack workspace, securely authorize ChatGPT Desktop, turn a natural-language project brief into an explicitly approved project, and execute a project deletion explicitly approved in the hosted workspace. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to open the CogentStack workspace, asks to sign in to CogentStack from Desktop, describes a project they want CogentStack to create after approving its setup, or asks to delete the currently requested CogentStack project and its folder.
 ---
 
 # Use CogentStack
@@ -41,3 +41,14 @@ When the user describes the project they want after recording an approved creati
 6. On success, report the exact target path, passed tests, and baseline commit. Then continue in the same task by treating the user's composer text as the project brief. Work only inside the created target, follow its generated repository instructions and acceptance checks, and verify the requested work. Do not push, deploy, commit beyond the generated baseline, or change any other repository unless the user explicitly asks.
 
 After opening the workspace, display a brief welcome explaining that Project Types can be browsed freely, sign-in or a licence is requested only when a contract is used, and the user can stay in the same task and write their project brief in the adjacent composer after approving Step 2.
+
+## Delete an approved project and folder
+
+When the user explicitly asks to delete a project after typing its exact name and approving deletion in the hosted **Open project** page:
+
+1. Run `scripts/delete-project.ps1 -Mode inspect`. It returns only the current authoritative deletion request.
+2. If no request is available, explain that the user must approve deletion on the **Open project** page first. If more than one request is ever returned, report a CogentStack service-state error; never choose among deletion requests.
+3. Run `scripts/delete-project.ps1 -Mode delete -RequestId <approved UUID>` for the sole request. When exactly one request exists, `-RequestId` may be omitted.
+4. Never delete the path manually or substitute a path from conversation context. The helper accepts only matching server-returned deletion and project IDs, the exact registered child path, approved parent directory, project slug, and short-lived execution grant. It refuses drive roots, temporary validation paths, files, reparse points at the parent, target, or nested levels, and mismatched parents or folder names.
+5. Treat success as proven only when the helper returns `status:deleted`. On failure, report the requested target, `folderRemoved`, `registrationFinalized`, and whether a partial folder remains. If the folder was removed before server acknowledgement failed, say that the filesystem deletion is already permanent even though registration was not finalized. Do not retry without a fresh hosted approval.
+6. On success, report the exact deleted target and `folderRemoved`. If it is false, say that the folder was already absent; never claim it was removed. State that the registration deletion is permanent and unrecoverable.
