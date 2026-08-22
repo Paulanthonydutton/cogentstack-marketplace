@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cogentstack.app/schemas/guardrail-pack-v0.1.json",
+  "title": "CogentStack Community Guardrail Pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "kind", "id", "name", "version", "description", "publisher", "license", "projectTypes", "execution", "requirements", "controls", "guidance", "acceptance"],
+  "properties": {
+    "protocolVersion": { "const": "0.1" },
+    "kind": { "const": "guardrail-pack" },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", "maxLength": 100 },
+    "name": { "type": "string", "minLength": 3, "maxLength": 100 },
+    "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$" },
+    "description": { "type": "string", "minLength": 20, "maxLength": 500 },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "url"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 100 },
+        "url": { "type": "string", "format": "uri", "pattern": "^https://" }
+      }
+    },
+    "license": { "type": "string", "minLength": 2, "maxLength": 50 },
+    "projectTypes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$" }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "allowScripts"],
+      "properties": {
+        "mode": { "const": "declarative" },
+        "allowScripts": { "const": false }
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/requirement" }
+    },
+    "controls": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/control" }
+    },
+    "guidance": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": { "type": "string", "minLength": 10, "maxLength": 500 }
+    },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/acceptance" }
+    }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,79}$" },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["artifact", "configuration", "review-record", "static-analysis", "test-output"] }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "statement", "level", "evidence"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "title": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "statement": { "type": "string", "minLength": 20, "maxLength": 800 },
+        "level": { "enum": ["required", "recommended"] },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "purpose"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "title": { "type": "string", "minLength": 3, "maxLength": 120 },
+        "purpose": { "type": "string", "minLength": 20, "maxLength": 800 }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "evidence"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "statement": { "type": "string", "minLength": 20, "maxLength": 800 },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    }
+  }
+}
+

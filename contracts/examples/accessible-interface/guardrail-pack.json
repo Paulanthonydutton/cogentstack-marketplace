@@ -1,0 +1,72 @@
+{
+  "protocolVersion": "0.1",
+  "kind": "guardrail-pack",
+  "id": "cogentstack.example.accessible-interface",
+  "name": "Accessible Interface Guardrails",
+  "version": "0.1.0",
+  "description": "A sanitised example showing how a community pack can define accessible interface requirements and inspectable acceptance evidence without executable code.",
+  "publisher": {
+    "id": "cogentstack",
+    "name": "CogentStack",
+    "url": "https://cogentstack.app"
+  },
+  "license": "Apache-2.0",
+  "projectTypes": ["website", "web_app", "campaign_website", "landing_page"],
+  "execution": {
+    "mode": "declarative",
+    "allowScripts": false
+  },
+  "requirements": [
+    {
+      "id": "semantic-structure",
+      "title": "Semantic document structure",
+      "statement": "Public interfaces must use meaningful landmarks, headings, labels, and native controls before adding custom interaction behaviour.",
+      "level": "required",
+      "evidence": ["artifact", "static-analysis", "test-output"]
+    },
+    {
+      "id": "keyboard-operation",
+      "title": "Keyboard operation",
+      "statement": "Every core journey and interactive control must be usable by keyboard with visible focus and a logical navigation order.",
+      "level": "required",
+      "evidence": ["review-record", "test-output"]
+    },
+    {
+      "id": "responsive-reflow",
+      "title": "Responsive reflow",
+      "statement": "Content and controls must remain understandable and operable across supported viewport sizes without hiding essential actions.",
+      "level": "required",
+      "evidence": ["artifact", "test-output"]
+    }
+  ],
+  "controls": [
+    {
+      "id": "native-controls-first",
+      "title": "Native controls first",
+      "purpose": "Reduce avoidable accessibility failures by preferring browser-native elements and behaviour before custom widgets."
+    },
+    {
+      "id": "manual-review-required",
+      "title": "Manual review required",
+      "purpose": "Prevent automated checks from being presented as complete accessibility assurance without a recorded human review."
+    }
+  ],
+  "guidance": [
+    "Preserve semantic meaning when visual presentation changes.",
+    "Do not remove visible focus indicators without providing an equally clear replacement.",
+    "Record limitations and unresolved accessibility decisions rather than claiming unsupported compliance."
+  ],
+  "acceptance": [
+    {
+      "id": "journeys-keyboard-complete",
+      "statement": "Recorded evidence demonstrates that every defined core journey can be completed using keyboard input alone.",
+      "evidence": ["review-record", "test-output"]
+    },
+    {
+      "id": "automated-findings-resolved",
+      "statement": "Automated accessibility findings are resolved or explicitly documented with an owner, reason, and follow-up decision.",
+      "evidence": ["static-analysis", "review-record"]
+    }
+  ]
+}
+

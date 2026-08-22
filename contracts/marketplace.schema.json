@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cogentstack.app/schemas/contract-marketplace-v0.1.json",
+  "title": "CogentStack Contract Marketplace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "updatedAt", "entries"],
+  "properties": {
+    "protocolVersion": { "const": "0.1" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "version", "trustLevel", "status", "source"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "version": { "type": "string" },
+          "trustLevel": { "enum": ["example", "community", "verified", "official"] },
+          "status": { "enum": ["example", "active", "deprecated", "suspended"] },
+          "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repository", "path", "revision"],
+            "properties": {
+              "repository": { "type": "string", "pattern": "^https://" },
+              "path": { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" },
+              "revision": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
