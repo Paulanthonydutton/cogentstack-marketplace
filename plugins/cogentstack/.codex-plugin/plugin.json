@@ -1,7 +1,7 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260820063435",
-  "description": "Open CogentStack, securely authorize ChatGPT Desktop, build explicitly approved server-generated projects, and execute project-folder deletions explicitly confirmed in the hosted workspace.",
+  "version": "0.4.0+codex.20260822043204",
+  "description": "Open CogentStack, securely authorize ChatGPT Desktop, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
   "author": {
@@ -15,8 +15,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "CogentStack",
-    "shortDescription": "Open, build, and safely manage CogentStack projects.",
-    "longDescription": "CogentStack opens the hosted workspace at cogentstack.app, supports user-approved Desktop authorization, turns natural-language briefs into explicitly approved projects through verified server-generated artifacts, and executes project-folder deletion only after exact hosted confirmation. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
+    "shortDescription": "Open, build, deploy, and safely manage CogentStack projects.",
+    "longDescription": "CogentStack opens the hosted workspace at cogentstack.app, supports user-approved Desktop authorization, turns natural-language briefs into explicitly approved projects through verified server-generated artifacts, prepares approved Deployment Packs, and executes project-folder deletion only after exact hosted confirmation. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
     "developerName": "Paula",
     "category": "Productivity",
     "capabilities": [
@@ -27,6 +27,7 @@
       "Open the CogentStack workspace.",
       "Sign in to CogentStack from Desktop.",
       "Build the approved project I describe in this composer.",
+      "Prepare the Deployment Pack I approved in CogentStack.",
       "Delete the project I explicitly approved for deletion in CogentStack."
     ],
     "brandColor": "#087E6D",

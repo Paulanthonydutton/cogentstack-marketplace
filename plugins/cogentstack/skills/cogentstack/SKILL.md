@@ -1,6 +1,6 @@
 ---
 name: cogentstack
-description: Open the hosted CogentStack workspace, securely authorize ChatGPT Desktop, turn a natural-language project brief into an explicitly approved project, and execute a project deletion explicitly approved in the hosted workspace. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to open the CogentStack workspace, asks to sign in to CogentStack from Desktop, describes a project they want CogentStack to create after approving its setup, or asks to delete the currently requested CogentStack project and its folder.
+description: Open the hosted CogentStack workspace, securely authorize ChatGPT Desktop, turn a natural-language project brief into an explicitly approved project, prepare an explicitly approved independent deployment handoff, and execute a project deletion explicitly approved in the hosted workspace. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to open the CogentStack workspace, asks to sign in to CogentStack from Desktop, describes a project they want CogentStack to create after approving its setup, asks to prepare an approved Deployment Pack, or asks to delete the currently requested CogentStack project and its folder.
 ---
 
 # Use CogentStack
@@ -67,3 +67,13 @@ When the user explicitly asks to delete a project after typing its exact name an
 4. Never delete the path manually or substitute a path from conversation context. The helper accepts only matching server-returned deletion and project IDs, the exact registered child path, approved parent directory, project slug, and short-lived execution grant. It refuses drive roots, temporary validation paths, files, reparse points at the parent, target, or nested levels, and mismatched parents or folder names.
 5. Treat success as proven only when the helper returns `status:deleted`. On failure, report the requested target, `folderRemoved`, `registrationFinalized`, and whether a partial folder remains. If the folder was removed before server acknowledgement failed, say that the filesystem deletion is already permanent even though registration was not finalized. Do not retry without a fresh hosted approval.
 6. On success, report the exact deleted target and `folderRemoved`. If it is false, say that the folder was already absent; never claim it was removed. State that the registration deletion is permanent and unrecoverable.
+
+## Prepare an independent deployment handoff
+
+Use this flow only after the user selects a completed project in the hosted **Hosting** tab and presses **Generate Deployment Pack**.
+
+1. Inspect the approved request with `scripts/prepare-deployment.ps1 -Mode inspect`.
+2. Prepare the fixed handoff files with `scripts/prepare-deployment.ps1 -Mode prepare -RequestId "<request-id>"`.
+3. Report the exact project folder and the generated `DEPLOYMENT.md` and `deployment.manifest.json` files.
+4. Direct the user to the hosted **Changes** tab to explicitly commit, set the GitHub remote and push. Never push or deploy without a separate approved Git request.
+5. Do not request or store hosting credentials. CogentStack prepares the handoff; the project owner selects and operates the production host.
