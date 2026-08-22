@@ -74,6 +74,10 @@ Use this flow only after the user selects a completed project in the hosted **Ho
 
 1. Inspect the approved request with `scripts/prepare-deployment.ps1 -Mode inspect`.
 2. Prepare the fixed handoff files with `scripts/prepare-deployment.ps1 -Mode prepare -RequestId "<request-id>"`.
-3. Report the exact project folder and the generated `DEPLOYMENT.md` and `deployment.manifest.json` files.
-4. Direct the user to the hosted **Changes** tab to explicitly commit, set the GitHub remote and push. Never push or deploy without a separate approved Git request.
-5. Do not request or store hosting credentials. CogentStack prepares the handoff; the project owner selects and operates the production host.
+3. Report the exact project folder, the generated `DEPLOYMENT.md` and `deployment.manifest.json` files, and the approved non-secret repository/host target recorded in them.
+4. Do not push or connect during pack preparation. A destination recorded in the manifest is not permission to use it.
+5. If the user subsequently and explicitly asks to deploy to that target, read the local manifest, show the exact repository, branch, host, port, deployment directory, health URL and planned local actions, then obtain confirmation that those exact targets are approved.
+6. Use only the local machine's existing Git credential helper, SSH configuration and SSH agent. Never request, print, store, copy into the manifest, or transmit passwords, access tokens, private keys or agent material.
+7. Before the first SSH connection, compare the live host key with the approved fingerprint. Stop on a missing or mismatched fingerprint unless the user independently verifies and explicitly approves the new key.
+8. Keep execution bounded by the manifest: push only the approved branch and repository; connect only to the approved host and port; write only beneath the approved deployment directory; run the documented build, health and release checks; produce rollback instructions and record the deployed source revision.
+9. Direct the user to the hosted **Changes** tab for ordinary source-history actions that are not part of the explicitly approved deployment.
