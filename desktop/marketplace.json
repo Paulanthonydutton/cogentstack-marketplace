@@ -2,20 +2,20 @@
   "$schema": "./marketplace.schema.json",
   "schemaVersion": 1,
   "application": "CogentStack Desktop",
-  "latestVersion": "0.1.1",
+  "latestVersion": "0.1.2",
   "minimumSupportedVersion": "0.1.1",
-  "releaseTag": "desktop-v0.1.1",
-  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.1",
+  "releaseTag": "desktop-v0.1.2",
+  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.2",
   "releaseNotes": [
-    "Adds the human-readable Qwen Abilities panel.",
-    "Adds audited picture-understanding installation and image input.",
-    "Correctly reports Qwen as the Desktop workspace connection."
+    "Separates free Qwen Desktop abilities from CogentStack plan abilities.",
+    "Adds a human-readable catalogue for chat, pictures, documents, speech, data and web research.",
+    "Restricts the generic local installer to abilities explicitly marked free."
   ],
   "windows": {
     "architecture": "x64",
-    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.1/CogentStack-Desktop-0.1.1-x64-setup.exe",
-    "installerSha256": "f68e7f6f9aa716ed3d247a3b69a468f4f2d816a8119c06ab2a8f622dcc80db28",
-    "installerSizeBytes": 56302746,
+    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.2/CogentStack-Desktop-0.1.2-x64-setup.exe",
+    "installerSha256": "05b94d485c8530f852e5ac133c8c2828761eeb3fe0f6926d013c284be5d5072f",
+    "installerSizeBytes": 56311211,
     "authenticodeSigned": false,
     "requiresUserApproval": true,
     "automaticLaunch": false
