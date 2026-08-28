@@ -1,0 +1,23 @@
+{
+  "$schema": "./marketplace.schema.json",
+  "schemaVersion": 1,
+  "application": "CogentStack Desktop",
+  "latestVersion": "0.1.1",
+  "minimumSupportedVersion": "0.1.1",
+  "releaseTag": "desktop-v0.1.1",
+  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.1",
+  "releaseNotes": [
+    "Adds the human-readable Qwen Abilities panel.",
+    "Adds audited picture-understanding installation and image input.",
+    "Correctly reports Qwen as the Desktop workspace connection."
+  ],
+  "windows": {
+    "architecture": "x64",
+    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.1/CogentStack-Desktop-0.1.1-x64-setup.exe",
+    "installerSha256": "f68e7f6f9aa716ed3d247a3b69a468f4f2d816a8119c06ab2a8f622dcc80db28",
+    "installerSizeBytes": 56302746,
+    "authenticodeSigned": false,
+    "requiresUserApproval": true,
+    "automaticLaunch": false
+  }
+}
