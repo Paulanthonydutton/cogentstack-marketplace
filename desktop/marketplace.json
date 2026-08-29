@@ -2,22 +2,22 @@
   "$schema": "./marketplace.schema.json",
   "schemaVersion": 1,
   "application": "CogentStack Desktop",
-  "latestVersion": "0.1.4",
+  "latestVersion": "0.1.5",
   "minimumSupportedVersion": "0.1.1",
-  "releaseTag": "desktop-v0.1.4",
-  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.4",
+  "releaseTag": "desktop-v0.1.5",
+  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.5",
   "releaseNotes": [
-    "Labels the completed Local AI audit as Findings.",
-    "Offers default-checked removal of replaced Qwen chat models after the new model is verified.",
-    "Preserves separate Qwen ability models, including picture understanding."
+    "Allows the Qwen chat model recommended by the completed machine audit to pass the installation gate.",
+    "Continues to block models and optional abilities outside the audited safe hardware range.",
+    "Removes an older Qwen chat model only after the replacement has downloaded and been verified."
   ],
   "windows": {
     "architecture": "x64",
-    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.4/CogentStack-Desktop-0.1.4-x64-setup.exe",
-    "installerSha256": "16793f718f9de6b9a95e6496eef6cabb8fa3368a49c3fd376fb13d48eee83f9e",
-    "installerSizeBytes": 57760740,
+    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.5/CogentStack-Desktop-0.1.5-x64-setup.exe",
+    "installerSha256": "9a8e9939dc36af136c1d69c8fc44c4a6077917ce894be5e3efbe85c22c96ea04",
+    "installerSizeBytes": 57769102,
     "authenticodeSigned": false,
-    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSmVkN3BkaTZwZkhFeXMwUUNiMWN0M1dDYnRPU1crZXN4NFplT0JjVmR1TGhxRys5VWJYS0pYVkpYQmNGandIYXpsdVAwMHR5a1RsQm9La2F3NlFkbFFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3OTg5MTUzCWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuNF94NjQtc2V0dXAuZXhlCnQ3S3pPaDhleXFTT0JoWVFaTGpVaVdYZDlaR3JJdkkxMmszaUVtaXN3YW5Sbk5zN3ZzT0xSRmQ4TmxqeHpnb1ZNN1MvczF1b0JBeGFFNHM0b1U4WER3PT0K",
+    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSlJLbmhDRjRmTUNJYnVoUkthTnVJZTl6L2YyMm5RR0VmN04vTUQ3Zkx3ZkN2cFMyajZraUJiYmpKWDgvam0wa05aWEZ5T3lmcDI5RnhCUjc1L2tnUlFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3OTkyMzg2CWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuNV94NjQtc2V0dXAuZXhlCnRyNU5UNGUyOEhRemp3dVlSUngvamplcktRQ25vdUV0WFg0cmRadWs2WnpDN0ZKMmc3aVNiUjZkY0VjZWhqVW9oeWk0anM4V3R2MnVSOTUvUmtMTUJnPT0K",
     "requiresUserApproval": true,
     "automaticLaunch": false
   }
