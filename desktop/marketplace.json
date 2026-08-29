@@ -2,22 +2,22 @@
   "$schema": "./marketplace.schema.json",
   "schemaVersion": 1,
   "application": "CogentStack Desktop",
-  "latestVersion": "0.1.9",
+  "latestVersion": "0.1.10",
   "minimumSupportedVersion": "0.1.1",
-  "releaseTag": "desktop-v0.1.9",
-  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.9",
+  "releaseTag": "desktop-v0.1.10",
+  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.10",
   "releaseNotes": [
-    "Local AI ability installation, updates and removal are now managed from the CogentStack Local AI website.",
-    "CogentStack Desktop now shows installed abilities as simple switches and links back to the website to manage them.",
-    "The background Local AI Service now launches without leaving a black Windows window visible."
+    "CogentStack Desktop now shows only abilities that are technically ready and resolved for the current user.",
+    "Plan-required and unresolved ability cards no longer appear in the Desktop ability list.",
+    "Installation, subscription checks, updates and removal remain on the CogentStack Local AI website."
   ],
   "windows": {
     "architecture": "x64",
-    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.9/CogentStack-Desktop-0.1.9-x64-setup.exe",
-    "installerSha256": "e79bcf62b2d79859dea6a9745e86e1cb7998a931f3d6e6176801ca8eba9802fe",
-    "installerSizeBytes": 57806787,
+    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.10/CogentStack-Desktop-0.1.10-x64-setup.exe",
+    "installerSha256": "d4427eec4b36c97fe93bcb768aca1a5a80f3afa3ba19720d6e507300de2f89dc",
+    "installerSizeBytes": 57811420,
     "authenticodeSigned": false,
-    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSmRsK0p0WlZWY3kvd2Q0OFB5NDhWSnVwMmpSRVZJK1ZYb2VSYXdieU1kcTNCa2ZiZFpCYklWT1pxRmwrMlVYQkl0MmI0Uk5rM3RKRzQrZHBHOFB3WFE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MDI4Njg3CWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuOV94NjQtc2V0dXAuZXhlCmxSUWlEWXFqYkhPNDNyNnQ3OVZNNlpQNExpZWRhMGJka015ZWlTWE5iSGlwWUtWTC9yT1prNldLMlpHcy9FNWVLOWwySUJHUSt4eFhZK0w4NmJ6eUNRPT0K",
+    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSmZuNEwyd3B4YTBEMDJQUUVxa1RPUlZVL1lMbUVTa3V5T3AvR2dwcEFSQmxGcVZQYXBDVWJLYll2VEk4ckRCOVZXakpGVCtMRkhwSkh4Q3NkWHUvMXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MDMzNTAwCWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuMTBfeDY0LXNldHVwLmV4ZQo1T05EVXZvZFdMUXBPYXR5dW01WUZQVThSNXZkQ1dPM1ptUUh2OWQvODN1N1FUMGd1eVpqbHdCZUVuRmhWT0tRcHVRZS9WUU1Qc0ZUQk43aGgwSmtEZz09Cg==",
     "requiresUserApproval": true,
     "automaticLaunch": false
   }
