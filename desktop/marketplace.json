@@ -2,22 +2,22 @@
   "$schema": "./marketplace.schema.json",
   "schemaVersion": 1,
   "application": "CogentStack Desktop",
-  "latestVersion": "0.1.5",
+  "latestVersion": "0.1.6",
   "minimumSupportedVersion": "0.1.1",
-  "releaseTag": "desktop-v0.1.5",
-  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.5",
+  "releaseTag": "desktop-v0.1.6",
+  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.6",
   "releaseNotes": [
-    "Allows the Qwen chat model recommended by the completed machine audit to pass the installation gate.",
-    "Continues to block models and optional abilities outside the audited safe hardware range.",
-    "Removes an older Qwen chat model only after the replacement has downloaded and been verified."
+    "Opens an installed but closed Desktop runtime before a website machine audit and requests Chrome local-network access.",
+    "Treats a closed Desktop application as launchable instead of incorrectly requiring another installation.",
+    "Shows live Qwen download progress and resumes safely when Ollama restarts during a model download."
   ],
   "windows": {
     "architecture": "x64",
-    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.5/CogentStack-Desktop-0.1.5-x64-setup.exe",
-    "installerSha256": "9a8e9939dc36af136c1d69c8fc44c4a6077917ce894be5e3efbe85c22c96ea04",
-    "installerSizeBytes": 57769102,
+    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.6/CogentStack-Desktop-0.1.6-x64-setup.exe",
+    "installerSha256": "725f8e8848de1ead31b68d353a6f98dccc2b4269b0311aa35f0ad97b851c71a3",
+    "installerSizeBytes": 57762630,
     "authenticodeSigned": false,
-    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSlJLbmhDRjRmTUNJYnVoUkthTnVJZTl6L2YyMm5RR0VmN04vTUQ3Zkx3ZkN2cFMyajZraUJiYmpKWDgvam0wa05aWEZ5T3lmcDI5RnhCUjc1L2tnUlFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3OTkyMzg2CWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuNV94NjQtc2V0dXAuZXhlCnRyNU5UNGUyOEhRemp3dVlSUngvamplcktRQ25vdUV0WFg0cmRadWs2WnpDN0ZKMmc3aVNiUjZkY0VjZWhqVW9oeWk0anM4V3R2MnVSOTUvUmtMTUJnPT0K",
+    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSlgwMko0c2srREFlL3VwdW42RXZ2aGppUTZ2aUhHbCtOUS91M3pLRXVMQTljYkpvcDhHYzJncWg1cE0wcCs1c3V3NWpnSWVuTThaTUxmZW0xOGNjYmdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3OTk4MDY4CWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuNl94NjQtc2V0dXAuZXhlCm5VbVd6ZEtocldianhLL0thbnkrUERjSXNMYkRkUkJNNlpFTGlpa2c0NkRMQjQ5VHA5ZXUxbkRzVGVQS3RMM013MUN4eXdHcnZVTUVPSWM4VHcraUFnPT0K",
     "requiresUserApproval": true,
     "automaticLaunch": false
   }
