@@ -34,6 +34,12 @@ if (windows.installerUrl !== expectedInstallerUrl) fail("installerUrl must be th
 if (!sha256.test(windows.installerSha256 ?? "")) fail("installerSha256 must be a lowercase SHA-256 digest");
 if (!Number.isSafeInteger(windows.installerSizeBytes) || windows.installerSizeBytes < 1) fail("installerSizeBytes must be a positive integer");
 if (typeof windows.authenticodeSigned !== "boolean") fail("authenticodeSigned must be explicit");
+if (windows.updaterSignature !== undefined && (
+  typeof windows.updaterSignature !== "string"
+  || windows.updaterSignature.length < 80
+  || windows.updaterSignature.length > 512
+  || /[\r\n]/.test(windows.updaterSignature)
+)) fail("updaterSignature must contain the Tauri signature file content");
 if (windows.requiresUserApproval !== true) fail("Windows installation must retain user approval");
 if (windows.automaticLaunch !== false) fail("first installation must not claim to launch automatically");
 
@@ -45,5 +51,6 @@ console.log(JSON.stringify({
   installer: expectedFilename,
   sha256: windows.installerSha256,
   size: windows.installerSizeBytes,
+  automaticUpdates: Boolean(windows.updaterSignature),
   automaticLaunch: windows.automaticLaunch,
 }));
