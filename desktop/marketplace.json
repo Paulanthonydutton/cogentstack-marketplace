@@ -2,22 +2,22 @@
   "$schema": "./marketplace.schema.json",
   "schemaVersion": 1,
   "application": "CogentStack Desktop",
-  "latestVersion": "0.1.12",
+  "latestVersion": "0.1.13",
   "minimumSupportedVersion": "0.1.1",
-  "releaseTag": "desktop-v0.1.12",
-  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.12",
+  "releaseTag": "desktop-v0.1.13",
+  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.13",
   "releaseNotes": [
-    "Quick mode now bypasses Qwen's unnecessary reasoning block for ordinary conversation.",
-    "Deep mode remains available when a request benefits from deliberate reasoning.",
-    "Both modes now have bounded local generation time and length, with the Stop control retained."
+    "Approved CogentStack account and subscription links now open in the system browser from the embedded work area.",
+    "Local AI setup opened from Desktop now returns directly to the Desktop work area.",
+    "The inner CogentStack brand is simplified and opens the CogentStack website externally."
   ],
   "windows": {
     "architecture": "x64",
-    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.12/CogentStack-Desktop-0.1.12-x64-setup.exe",
-    "installerSha256": "7e75a01ff881cb80b6e28f5d261c00887b941dce5df97c1288bda2325aac875a",
-    "installerSizeBytes": 57809773,
+    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.13/CogentStack-Desktop-0.1.13-x64-setup.exe",
+    "installerSha256": "818c5a7d25e0700c099d841a692fefb169aa29d7bd58ccca75bc707d7ded1726",
+    "installerSizeBytes": 57801240,
     "authenticodeSigned": false,
-    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSmJTRjNZWXMwVEhLZVEzRlhOWldlb3NPcFNoREdNYUJ3TXlDSmhYNnRhUVNJZ1E5bG96WnU0VFlaTERSMjNLZnNQeFlYdFd5T0Q0QUtjc0dPUTkzSkE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MDUyMjY0CWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuMTJfeDY0LXNldHVwLmV4ZQpORWRrbUpLWlNiUDMveVV1cXMrSjFYOWZnSlZiemV0Vm1TV2hLcEI2MVRYV1l2enVwdzZ1VkZ3YnVQaUNmTEhKdkg4WURaeG1hbkFxbjlFUXB0YzFCUT09Cg==",
+    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSlc3d1JXbXp2MWNjdzFVdndDVWlBOWZOZExLYUpLa0FLTFJNY3NkTWlzMUJMSFhneWRDWGQ1L2s1MnZGZU5WdTZPZjNTTTU5Rlgwd053amcya1FETEFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MTA5Njg2CWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuMTNfeDY0LXNldHVwLmV4ZQprSCs4Mm5pT3NzODRJbGkwNVMrem5ZNTViU2oyazR1b3R3LzN4bmN3cXgvLzV1VENQTStKbUVaVTFHSC95NzRYbUFhamdtdjdWWGtYWVNLN2doaEhDdz09Cg==",
     "requiresUserApproval": true,
     "automaticLaunch": false
   }
