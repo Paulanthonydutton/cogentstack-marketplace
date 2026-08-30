@@ -1,6 +1,6 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260822043204",
+  "version": "0.4.0+codex.20260830093903",
   "description": "Open CogentStack, securely authorize ChatGPT Desktop, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",

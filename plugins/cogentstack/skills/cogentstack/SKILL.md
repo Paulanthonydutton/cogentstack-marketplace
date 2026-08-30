@@ -22,7 +22,7 @@ CogentStack's public plugin launches the hosted workspace, runs the small Deskto
 }
 ```
 
-The URL must be exactly the returned `https://cogentstack.app/stack` URL. Never fall back to `/app`, localhost, a bundled web server, or a manually created browser tab.
+The URL must be exactly the returned `https://cogentstack.app/stack?surface=chatgpt` URL. Never fall back to `/app`, localhost, a bundled web server, or a manually created browser tab.
 5. Treat either `opened` or `queued` from `codex_app__open_in_codex` as an accepted host mount request. `queued` means Codex will attach the panel when the task is visible. Do not create or claim browser tabs, pass `tabId`, open a blank tab, or retry the panel call; those workarounds create duplicate tabs and can leave **New tab** selected instead of CogentStack.
 6. On Windows, run `scripts/hide-codex-sidebar.ps1` only after the host accepts the open request so the hosted workspace has room beside the conversation.
 7. Authentication and licence validation begin only when the user chooses **Use [project type] contract** in the hosted workspace.

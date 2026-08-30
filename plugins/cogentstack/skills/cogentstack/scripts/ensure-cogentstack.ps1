@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$workspaceUrl = 'https://cogentstack.app/stack'
+$workspaceUrl = 'https://cogentstack.app/stack?surface=chatgpt'
 $response = Invoke-WebRequest -UseBasicParsing -Uri $workspaceUrl -Headers @{ Accept = 'text/html' } -TimeoutSec 15
 if ($response.StatusCode -ne 200) {
     throw "CogentStack is unavailable at $workspaceUrl (HTTP $($response.StatusCode))."
