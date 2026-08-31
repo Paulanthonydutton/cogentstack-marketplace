@@ -2,22 +2,22 @@
   "$schema": "./marketplace.schema.json",
   "schemaVersion": 1,
   "application": "CogentStack Desktop",
-  "latestVersion": "0.1.14",
+  "latestVersion": "0.1.15",
   "minimumSupportedVersion": "0.1.1",
-  "releaseTag": "desktop-v0.1.14",
-  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.14",
+  "releaseTag": "desktop-v0.1.15",
+  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.15",
   "releaseNotes": [
-    "Adds a Cloud or Local provider switch, with layout ready for future Hybrid.",
-    "Shows approved Alibaba Cloud Qwen models and lets Cloud users toggle every response ability.",
-    "Adds prepaid USD Cloud Balance status and removes the Free ability badge."
+    "Requires an active Professional or Studio subscription for Local Qwen and both subscription and Cloud funding for Hybrid eligibility.",
+    "Adds Cloud, Local and Hybrid controls with server-verified Local Qwen entitlement enforcement.",
+    "Moves image and text-file attachments into a compact composer plus control and tidies the paired project workspace header."
   ],
   "windows": {
     "architecture": "x64",
-    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.14/CogentStack-Desktop-0.1.14-x64-setup.exe",
-    "installerSha256": "01785da8f954be503fd311e5aed87e673ab2313a30dd2e2010064fcaa15040b3",
-    "installerSizeBytes": 57813549,
+    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.15/CogentStack-Desktop-0.1.15-x64-setup.exe",
+    "installerSha256": "3490a24ec72b847973726c82bb930918125f5ff171f57be84528e366ed63f512",
+    "installerSizeBytes": 57830415,
     "authenticodeSigned": false,
-    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSmIzTXBHWU00QVBaK29ya20rd2xRSXlCK3B4Nlh6OEFMS2wyRG5yS1hhL3M3b3NwN2NUQVVnVWpXZFhCeE9oSFc5NVFycDhyRGFvZlZaak1mc3NMSndzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MTc1OTI5CWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuMTRfeDY0LXNldHVwLmV4ZQp1T3B4UXl4TEVQRDZRM3VXYkdhaytYRnpFQ1lsUmg2MHd0MWh3ZW1xMDhoSFB1UkFyTDJwZFZ0ZmJwZVdQaC8xZXp4bWN5WGpaZkFZNXRpNUlwK3dBZz09Cg==",
+    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSmFUTmx0c1hLVk9HZW83RUNsYnE5RGwwWlVwZEJXb1RQcFlEcHJjM1Q1WHN3b0FvTXp1VlhSOU1QQWEwYm9iYVZlbkFzSnJ0UjhyRXJIcG1oOFpoSmdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4MTk3NDkzCWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuMTVfeDY0LXNldHVwLmV4ZQpnMWlEMzZlRDU5aUtMeVVrR0R6QlFOclRaMkx2WURSbFhYYVo2aENVaUhHallSUlQ1SkpndEEwbnl2SS9LYTUrK3ZuOWlNcGZGMUVOTUhFbFdJZWtDdz09Cg==",
     "requiresUserApproval": true,
     "automaticLaunch": false
   }
