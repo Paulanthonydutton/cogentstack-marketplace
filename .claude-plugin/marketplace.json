@@ -1,0 +1,29 @@
+{
+  "name": "cogentstack",
+  "owner": {
+    "name": "CogentStack"
+  },
+  "metadata": {
+    "description": "CogentStack plugins for Claude Code Desktop"
+  },
+  "plugins": [
+    {
+      "name": "cogentstack",
+      "source": "./claude-plugins/cogentstack",
+      "description": "Open CogentStack beside Claude Code Desktop and fulfil explicitly approved Contract Pack projects.",
+      "version": "0.1.0",
+      "author": {
+        "name": "CogentStack"
+      },
+      "homepage": "https://cogentstack.app/",
+      "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
+      "category": "productivity",
+      "keywords": [
+        "cogentstack",
+        "claude-code",
+        "project-contracts",
+        "project-types"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "cogentstack",
+  "version": "0.1.0",
+  "description": "Open CogentStack beside Claude Code Desktop and fulfil explicitly approved Contract Pack projects.",
+  "author": {
+    "name": "CogentStack"
+  },
+  "homepage": "https://cogentstack.app/",
+  "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
+  "license": "UNLICENSED",
+  "keywords": [
+    "cogentstack",
+    "claude-code",
+    "project-contracts",
+    "project-types"
+  ]
+}
