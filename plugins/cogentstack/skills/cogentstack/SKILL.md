@@ -34,8 +34,8 @@ The URL must be exactly the returned `https://cogentstack.app/stack?surface=chat
 
 When the user explicitly asks to sign in, log in, connect their CogentStack account, or authorize Desktop:
 
-1. Run `scripts/connect-cogentstack.ps1` with its default `start` mode. It requests a short-lived device authorization and opens the system default browser. It does not send a licence key or copy a browser cookie.
-2. Tell the user to sign in and approve the displayed ChatGPT Desktop request in that browser. Show the returned user code so they can verify the browser is approving the same request.
+1. Run `scripts/connect-cogentstack.ps1` with its default `start` mode. It opens the official CogentStack website in the system default browser. It does not send a licence key or copy a browser cookie.
+2. Do not show, describe, or ask the user to enter an authorization code. If the browser is already signed in, ask the user only to select **Continue to ChatGPT Desktop**. Otherwise, ask them to sign in normally and then select that button. This familiar browser confirmation is the security boundary that prevents another local application or a deceptive link from silently authorizing itself.
 3. Run `scripts/connect-cogentstack.ps1 -Mode complete` after the returned polling interval. While it returns `approval_pending`, wait for the polling interval and try again. Keep the user updated at least once per minute and stop when the request expires.
 4. When it returns `authorized`, call `codex_app__open_in_codex` exactly once with its exact `workspaceUrl` as `target.url`, `target.type` set to `browser`, and `placement` set to `right`. The fragment contains a short-lived, one-use browser grant; never print it, copy it, log it, or place it in commentary.
 5. Treat either `opened` or `queued` as accepted. Do not create browser tabs or retry with a `tabId`.

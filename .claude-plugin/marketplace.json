@@ -11,7 +11,7 @@
       "name": "cogentstack",
       "source": "./claude-plugins/cogentstack",
       "description": "Open CogentStack beside Claude Code Desktop and fulfil explicitly approved Contract Pack projects.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "CogentStack"
       },

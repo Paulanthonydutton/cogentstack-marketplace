@@ -35,8 +35,8 @@ Workspace browsing is public. Sign-in and entitlement checks begin only when the
 
 When the user explicitly asks to sign in, connect, or authorize Claude Desktop:
 
-1. Run `connect-cogentstack.ps1` with its default `start` mode from this skill's scripts directory.
-2. Tell the user to sign in and approve the displayed **Claude Code Desktop on Windows** request in the browser. Show the returned user code so they can compare it with the browser.
+1. Run `connect-cogentstack.ps1` with its default `start` mode from this skill's scripts directory. It opens the official CogentStack website in the system default browser.
+2. Do not show, describe, or ask the user to enter an authorization code. If the browser is already signed in, ask the user only to select **Continue to Claude Desktop**. Otherwise, ask them to sign in normally and then select that button. This familiar browser confirmation prevents another local application or a deceptive link from silently authorizing itself.
 3. Run the helper with `-Mode complete` after the returned polling interval. While it reports `approval_pending`, wait for that interval and try again. Stop when it expires.
 4. When it returns `authorized`, keep its one-use workspace fragment private and pass the complete `workspaceUrl` directly to `open-cogentstack-panel.ps1 -Mode Open -Url "<workspaceUrl>"`.
 5. Never print, copy, log, summarize, or persist the one-use fragment outside the helper invocation.

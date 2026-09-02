@@ -100,8 +100,6 @@ if ($Mode -eq 'start') {
     Start-Process ([string]$authorization.verificationUriComplete)
     Write-CompactJson ([ordered]@{
         status = 'approval_required'
-        userCode = [string]$authorization.userCode
-        verificationUrl = [string]$authorization.verificationUriComplete
         expiresAt = [string]$authorization.expiresAt
         pollAfterSeconds = [int]$authorization.intervalSeconds
     })
@@ -143,7 +141,6 @@ try {
 if ([string]$result.status -eq 'authorization_pending') {
     Write-CompactJson ([ordered]@{
         status = 'approval_pending'
-        userCode = [string]$pending.userCode
         expiresAt = [string]$pending.expiresAt
         pollAfterSeconds = [int]$pending.intervalSeconds
     })
