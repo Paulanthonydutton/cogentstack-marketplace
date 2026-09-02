@@ -9,7 +9,7 @@ CogentStack's public plugin launches the hosted workspace, runs the small Deskto
 
 1. Installation and workspace browsing are public. Do not request a CogentStack account, licence key, activation code, or Desktop credential during installation or launch.
 2. Treat `$cogentstack`, `@cogentstack`, a CogentStack plugin mention, or a natural-language request to open CogentStack as the same launch request. Every invocation must run this complete sequence; do not stop after checking backend readiness.
-3. Run `scripts/ensure-cogentstack.ps1` exactly once.
+3. Run `scripts/ensure-cogentstack.ps1` exactly once. The helper checks the official website and, when this Windows user already has a valid DPAPI-protected Desktop authorization, exchanges it for a fresh one-use embedded-workspace grant. The official `https://cogentstack.app` account remains the sole login authority; the embedded panel never performs or stores the website login.
 4. Read the script's compact JSON. When it returns `status: ready`, immediately call `codex_app__open_in_codex` exactly once with this shape:
 
 ```json
@@ -22,10 +22,10 @@ CogentStack's public plugin launches the hosted workspace, runs the small Deskto
 }
 ```
 
-The URL must be exactly the returned `https://cogentstack.app/stack?surface=chatgpt` URL. Never fall back to `/app`, localhost, a bundled web server, or a manually created browser tab.
+The URL must be exactly the returned `https://cogentstack.app/stack?surface=chatgpt` URL, which may include a short-lived `#desktop=` fragment when an existing Desktop authorization was refreshed. Never print, copy, log, or remove that fragment. Never remove the surface marker or fall back to `/app`, localhost, a bundled web server, or a manually created browser tab.
 5. Treat either `opened` or `queued` from `codex_app__open_in_codex` as an accepted host mount request. `queued` means Codex will attach the panel when the task is visible. Do not create or claim browser tabs, pass `tabId`, open a blank tab, or retry the panel call; those workarounds create duplicate tabs and can leave **New tab** selected instead of CogentStack.
 6. On Windows, run `scripts/hide-codex-sidebar.ps1` only after the host accepts the open request so the hosted workspace has room beside the conversation.
-7. Authentication and licence validation begin only when the user chooses **Use [project type] contract** in the hosted workspace.
+7. If no existing Desktop authorization is available, authentication and licence validation begin only when the user chooses **Use [project type] contract** in the hosted workspace. Authentication must be completed on the official CogentStack website, never inside the embedded panel.
 8. Treat the hosted workspace as authoritative. Do not infer, recreate, cache, or disclose proprietary contract content, project-generation rules, subscriber credentials, or protected service responses.
 9. Contract activation, validation, project-artifact generation, and next-action decisions are executed by CogentStack's protected server-side Contract Runtime. Never request or download a complete contract, task blueprint, or Contract Pack. Consume only the narrow result presented by the hosted workspace or the request-bound generated files returned to the fulfilment helper.
 10. A hosted selection alone does not authorize local changes. Local project creation is allowed only after the user approves the exact target directory and submits a project request in the hosted workspace, then describes what they want built in the adjacent Codex composer. That brief is the explicit fulfilment instruction. Do not require a new task or a fixed command.
