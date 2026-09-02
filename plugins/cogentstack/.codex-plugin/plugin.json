@@ -1,7 +1,7 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260902191912",
-  "description": "Open CogentStack, securely authorize ChatGPT Desktop, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
+  "version": "0.4.0+codex.20260902203609",
+  "description": "Open CogentStack as an Edge companion beside ChatGPT or Codex, optionally use an isolated in-Codex panel, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
   "author": {
@@ -15,8 +15,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "CogentStack",
-    "shortDescription": "Open, build, deploy, and safely manage CogentStack projects.",
-    "longDescription": "CogentStack opens the hosted workspace at cogentstack.app, supports user-approved Desktop authorization, turns natural-language briefs into explicitly approved projects through verified server-generated artifacts, prepares approved Deployment Packs, and executes project-folder deletion only after exact hosted confirmation. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
+    "shortDescription": "Open an Edge companion, build, deploy, and manage projects.",
+    "longDescription": "CogentStack opens the hosted workspace as a Microsoft Edge companion beside ChatGPT or Codex on Windows, so an existing login in the normal Edge profile is retained. An isolated native Codex panel remains available only when explicitly requested and requires separate Desktop authorization. Natural-language briefs become explicitly approved projects through verified server-generated artifacts, approved Deployment Packs can be prepared, and project-folder deletion runs only after exact hosted confirmation. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
     "developerName": "Paula",
     "category": "Productivity",
     "capabilities": [
@@ -24,8 +24,8 @@
     ],
     "websiteURL": "https://cogentstack.app/",
     "defaultPrompt": [
-      "Open the CogentStack workspace.",
-      "Sign in to CogentStack from Desktop.",
+      "Open the CogentStack workspace beside this app.",
+      "Keep the CogentStack workspace inside Codex instead.",
       "Build the approved project I describe in this composer.",
       "Prepare the Deployment Pack I approved in CogentStack.",
       "Delete the project I explicitly approved for deletion in CogentStack."

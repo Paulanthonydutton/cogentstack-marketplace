@@ -1,48 +1,46 @@
 ---
 name: cogentstack
-description: Open the hosted CogentStack workspace, securely authorize ChatGPT Desktop, turn a natural-language project brief into an explicitly approved project, prepare an explicitly approved independent deployment handoff, and execute a project deletion explicitly approved in the hosted workspace. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to open the CogentStack workspace, asks to sign in to CogentStack from Desktop, describes a project they want CogentStack to create after approving its setup, asks to prepare an approved Deployment Pack, or asks to delete the currently requested CogentStack project and its folder.
+description: Open the hosted CogentStack workspace as a signed-in Edge companion beside ChatGPT or Codex on Windows, optionally keep it inside Codex with separate Desktop authorization, turn a natural-language project brief into an explicitly approved project, prepare an explicitly approved independent deployment handoff, and execute a project deletion explicitly approved in the hosted workspace. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to open the CogentStack workspace, asks to sign in to CogentStack from Desktop, describes a project they want CogentStack to create after approving its setup, asks to prepare an approved Deployment Pack, or asks to delete the currently requested CogentStack project and its folder.
 ---
 
 # Use CogentStack
 
-CogentStack's public plugin launches the hosted workspace, runs the small Desktop device-authorization client, and fulfils approved project requests from natural-language briefs users write in the adjacent Codex composer. It does not distribute contracts, task blueprints, compatibility rules, licence validation logic, or a local project generator. The protected server produces a request-bound project artifact; Desktop verifies and writes only that artifact.
+CogentStack's public plugin opens the hosted workspace in a Microsoft Edge app window arranged beside ChatGPT or Codex on Windows, and fulfils approved project requests from natural-language briefs users write in the adjacent composer. Because the companion uses the user's normal Edge profile, an existing CogentStack login in that Edge profile appears immediately. It does not distribute contracts, task blueprints, compatibility rules, licence validation logic, or a local project generator. The protected server produces a request-bound project artifact; Desktop verifies and writes only that artifact.
 
 1. Installation and workspace browsing are public. Do not request a CogentStack account, licence key, activation code, or Desktop credential during installation or launch.
 2. Treat `$cogentstack`, `@cogentstack`, a CogentStack plugin mention, or a natural-language request to open CogentStack as the same launch request. Every invocation must run this complete sequence; do not stop after checking backend readiness.
-3. Run `scripts/ensure-cogentstack.ps1` exactly once. The helper checks the official website and, when this Windows user already has a valid DPAPI-protected Desktop authorization, exchanges it for a fresh one-use embedded-workspace grant. The official `https://cogentstack.app` account remains the sole login authority; the embedded panel never performs or stores the website login.
-4. Read the script's compact JSON. When it returns `status: ready`, immediately call `codex_app__open_in_codex` exactly once with this shape:
+3. Run `scripts/ensure-cogentstack.ps1 -Mode Companion` exactly once. Read its compact JSON and require `status: ready`, `mode: companion`, and the official `https://cogentstack.app/stack?surface=chatgpt` URL. Never remove the surface marker or fall back to `/app`, localhost, a bundled web server, or a manually created browser tab.
+4. On Windows, immediately run `scripts/open-cogentstack-companion.ps1 -Mode Open -Url <exact returned URL>` exactly once. This opens CogentStack with Edge's `--app` window and arranges ChatGPT or Codex on the left with CogentStack on the right. Treat `arranged` as fully positioned and `opened_unarranged` as opened but not safely positionable. If it returns `browser_unavailable`, explain that Microsoft Edge must be installed for the companion flow. Do not silently fall back to an embedded Codex panel.
+5. The default companion uses the normal Edge profile. If that Edge profile is already signed into CogentStack, the workspace must show that logged-in state immediately. It cannot inherit a login held only by Chrome or another browser profile; in that case the user signs in normally in the Edge companion once.
+6. Do not call `codex_app__open_in_codex`, do not hide the Codex sidebar, and do not create or retry browser tabs during the default companion launch. This keeps queued panel mounts and duplicate tabs out of the normal flow.
+7. Treat the hosted workspace as authoritative. Do not infer, recreate, cache, or disclose proprietary contract content, project-generation rules, subscriber credentials, or protected service responses.
+8. Contract activation, validation, project-artifact generation, and next-action decisions are executed by CogentStack's protected server-side Contract Runtime. Never request or download a complete contract, task blueprint, or Contract Pack. Consume only the narrow result presented by the hosted workspace or the request-bound generated files returned to the fulfilment helper.
+9. A hosted selection alone does not authorize local changes. Local project creation is allowed only after the user approves the exact target directory and submits a project request in the hosted workspace, then describes what they want built in the adjacent composer. That brief is the explicit fulfilment instruction. Do not require a new task or a fixed command.
 
-```json
-{
-  "target": {
-    "type": "browser",
-    "url": "<exact url returned by ensure-cogentstack.ps1>"
-  },
-  "placement": "right"
-}
-```
+When the user asks to hide or close the companion, run `scripts/open-cogentstack-companion.ps1 -Mode Hide` or `-Mode Close`. Closing restores the remembered ChatGPT or Codex window position and removes only the companion layout record.
 
-The URL must be exactly the returned `https://cogentstack.app/stack?surface=chatgpt` URL, which may include a short-lived `#desktop=` fragment when an existing Desktop authorization was refreshed. Never print, copy, log, or remove that fragment. Never remove the surface marker or fall back to `/app`, localhost, a bundled web server, or a manually created browser tab.
-5. Treat either `opened` or `queued` from `codex_app__open_in_codex` as an accepted host mount request. `queued` means Codex will attach the panel when the task is visible. Do not create or claim browser tabs, pass `tabId`, open a blank tab, or retry the panel call; those workarounds create duplicate tabs and can leave **New tab** selected instead of CogentStack.
-6. On Windows, run `scripts/hide-codex-sidebar.ps1` only after the host accepts the open request so the hosted workspace has room beside the conversation.
-7. If no existing Desktop authorization is available, authentication and licence validation begin only when the user chooses **Use [project type] contract** in the hosted workspace. Authentication must be completed on the official CogentStack website, never inside the embedded panel.
-8. Treat the hosted workspace as authoritative. Do not infer, recreate, cache, or disclose proprietary contract content, project-generation rules, subscriber credentials, or protected service responses.
-9. Contract activation, validation, project-artifact generation, and next-action decisions are executed by CogentStack's protected server-side Contract Runtime. Never request or download a complete contract, task blueprint, or Contract Pack. Consume only the narrow result presented by the hosted workspace or the request-bound generated files returned to the fulfilment helper.
-10. A hosted selection alone does not authorize local changes. Local project creation is allowed only after the user approves the exact target directory and submits a project request in the hosted workspace, then describes what they want built in the adjacent Codex composer. That brief is the explicit fulfilment instruction. Do not require a new task or a fixed command.
+## Keep the workspace inside Codex
 
-## Sign in from ChatGPT Desktop
+Use the embedded mode only when the user explicitly asks to keep CogentStack inside Codex or requests the native right panel. Explain first that this panel has an isolated browser session: it does not inherit the user's Edge, Chrome, or system-browser CogentStack login and therefore needs a separate one-time Desktop authorization.
 
-When the user explicitly asks to sign in, log in, connect their CogentStack account, or authorize Desktop:
+1. Run `scripts/ensure-cogentstack.ps1 -Mode Embedded` exactly once and read its compact JSON.
+2. When it returns `status: ready`, call `codex_app__open_in_codex` exactly once with its exact returned URL as `target.url`, `target.type` set to `browser`, and `placement` set to `right`. The URL may contain a short-lived `#desktop=` fragment when a prior Desktop authorization was refreshed; never print, copy, log, alter, or remove that fragment.
+3. Treat either `opened` or `queued` as an accepted host mount request. Do not create browser tabs, pass `tabId`, open a blank tab, or retry the panel call.
+4. Run `scripts/hide-codex-sidebar.ps1` only after the host accepts the embedded open request.
+5. If `authenticated` is false, state that the panel is public/signed out until the one-time Desktop authorization below is completed. Never describe it as inheriting the normal browser login.
+
+## Authorize the isolated in-Codex panel
+
+When the user explicitly asks to authorize or sign in to the embedded Codex panel:
 
 1. Run `scripts/connect-cogentstack.ps1` with its default `start` mode. It opens the official CogentStack website in the system default browser. It does not send a licence key or copy a browser cookie.
-2. Do not show, describe, or ask the user to enter an authorization code. If the browser is already signed in, ask the user only to select **Continue to ChatGPT Desktop**. Otherwise, ask them to sign in normally and then select that button. This familiar browser confirmation is the security boundary that prevents another local application or a deceptive link from silently authorizing itself.
+2. Do not show, describe, or ask the user to enter an authorization code. If the browser is already signed in, ask the user only to select **Continue to ChatGPT Desktop**. Otherwise, ask them to sign in normally and then select that button.
 3. Run `scripts/connect-cogentstack.ps1 -Mode complete` after the returned polling interval. While it returns `approval_pending`, wait for the polling interval and try again. Keep the user updated at least once per minute and stop when the request expires.
-4. When it returns `authorized`, call `codex_app__open_in_codex` exactly once with its exact `workspaceUrl` as `target.url`, `target.type` set to `browser`, and `placement` set to `right`. The fragment contains a short-lived, one-use browser grant; never print it, copy it, log it, or place it in commentary.
-5. Treat either `opened` or `queued` as accepted. Do not create browser tabs or retry with a `tabId`.
-6. Run `scripts/hide-codex-sidebar.ps1` after the accepted open request. The workspace consumes the one-use grant, removes the fragment, and refreshes the account and licence status.
-7. The encrypted Desktop credential remains bound to the current Windows user through DPAPI. Never read, decrypt, display, or transmit it except through this script and CogentStack's protected API flow.
+4. When it returns `authorized`, call `codex_app__open_in_codex` exactly once with its exact `workspaceUrl` as `target.url`, `target.type` set to `browser`, and `placement` set to `right`. Never expose the short-lived fragment.
+5. Treat either `opened` or `queued` as accepted, do not create or retry browser tabs, and then run `scripts/hide-codex-sidebar.ps1`.
+6. The encrypted Desktop credential remains bound to the current Windows user through DPAPI. Never read, decrypt, display, or transmit it except through this script and CogentStack's protected API flow.
 
-When the user explicitly asks to sign out or disconnect ChatGPT Desktop, run `scripts/connect-cogentstack.ps1 -Mode disconnect`. This revokes the server token before removing the encrypted local credential. Browser sessions remain separately controllable from the CogentStack account page.
+When the user explicitly asks to sign out or disconnect the embedded Codex panel, run `scripts/connect-cogentstack.ps1 -Mode disconnect`. This revokes the server token before removing the encrypted local credential. The Edge companion's normal website session remains separately controllable from the CogentStack account page.
 
 ## Create from the adjacent composer brief
 
@@ -55,7 +53,7 @@ When the user describes the project they want after recording an approved creati
 5. The helper writes only beneath the server-returned target path, verifies every file and the whole artifact, installs dependencies, runs the generated acceptance tests, creates the initial Git baseline, and reports completion to the server. If it fails, do not delete the partial target; report its path and the failure clearly.
 6. On success, report the exact target path, passed tests, and baseline commit. Then continue in the same task by treating the user's composer text as the project brief. Work only inside the created target, follow its generated repository instructions and acceptance checks, and verify the requested work. Do not push, deploy, commit beyond the generated baseline, or change any other repository unless the user explicitly asks.
 
-After opening the workspace, display a brief welcome explaining that Project Types can be browsed freely, sign-in or a licence is requested only when a contract is used, and the user can stay in the same task and write their project brief in the adjacent composer after approving Step 2.
+After opening the workspace, display a brief welcome explaining that the Edge companion uses the normal Edge account session, Project Types can be browsed freely, sign-in or a licence is requested only when a contract is used, and the user can stay in the same task and write their project brief in the adjacent composer after approving Step 2.
 
 ## Delete an approved project and folder
 

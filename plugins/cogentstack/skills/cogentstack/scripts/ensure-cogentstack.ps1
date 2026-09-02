@@ -1,3 +1,8 @@
+param(
+    [ValidateSet('Companion', 'Embedded')]
+    [string]$Mode = 'Companion'
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -12,7 +17,7 @@ if ($response.StatusCode -ne 200) {
 $credentialPath = Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack') 'desktop-credential.json'
 $authenticated = $false
 
-if (Test-Path -LiteralPath $credentialPath) {
+if ($Mode -eq 'Embedded' -and (Test-Path -LiteralPath $credentialPath)) {
     try {
         if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
             try {
@@ -55,6 +60,7 @@ if (Test-Path -LiteralPath $credentialPath) {
     status = 'ready'
     url = $workspaceUrl
     remote = $true
+    mode = $Mode.ToLowerInvariant()
     authenticated = $authenticated
     loginAuthority = $serviceUrl
 } | ConvertTo-Json -Compress

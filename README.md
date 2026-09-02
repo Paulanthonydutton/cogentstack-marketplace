@@ -24,4 +24,10 @@ The Claude plugin is installed from this Git marketplace and retains `$cogentsta
 
 Claude Web is intentionally outside this package. It will use a separate remote-connector flow later.
 
+## ChatGPT and Codex Desktop
+
+The Codex plugin is installed from the Git-backed `.agents/plugins/` marketplace and retains `$cogentstack` as the common invocation. On Windows its default helper opens the protected `surface=chatgpt` workspace as a normal Microsoft Edge app window and arranges that companion beside ChatGPT or Codex. This preserves the signed-in state of the selected Edge profile and avoids queued native panel mounts and duplicate tabs.
+
+The native in-Codex panel remains available only when the user explicitly asks to keep CogentStack inside Codex. That panel has an isolated browser session, cannot inherit Edge or Chrome login cookies, and uses the separate one-time Desktop authorization flow.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the submission process and `contracts/protocol/v0.1/` for the protocol schema.
