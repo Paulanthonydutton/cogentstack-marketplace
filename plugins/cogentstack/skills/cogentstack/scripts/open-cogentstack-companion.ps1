@@ -22,25 +22,6 @@ function Confirm-CogentStackUrl([string]$Candidate) {
     return $parsed.AbsoluteUri
 }
 
-function Get-DesktopWindows {
-    @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.MainWindowHandle -ne [IntPtr]::Zero -and -not [string]::IsNullOrWhiteSpace($_.MainWindowTitle)
-    } | ForEach-Object {
-        [pscustomobject]@{
-            Handle = [Int64]$_.MainWindowHandle
-            ProcessId = [int]$_.Id
-            ProcessName = [string]$_.ProcessName
-            Title = [string]$_.MainWindowTitle
-        }
-    })
-}
-
-function Get-ChatDesktopWindow {
-    @(Get-DesktopWindows | Where-Object {
-        $_.ProcessName -match '(?i)^(chatgpt|codex)(?:[-_. ].*)?$' -and $_.Title -match '(?i)(chatgpt|codex)'
-    } | Sort-Object ProcessId | Select-Object -First 1)
-}
-
 function Find-BrowserExecutable([string]$CommandName, [string[]]$Candidates) {
     $command = Get-Command $CommandName -ErrorAction SilentlyContinue
     if ($command) { return [string]$command.Source }
@@ -54,21 +35,7 @@ function Get-DefaultHttpsProgId {
     try { return [string](Get-ItemProperty -LiteralPath $choicePath -ErrorAction Stop).ProgId } catch { return '' }
 }
 
-function Get-LastUsedProfileDirectory([string]$LocalStatePath, [string]$UserDataRoot) {
-    if (-not (Test-Path -LiteralPath $LocalStatePath -PathType Leaf)) { return $null }
-    try {
-        $lastUsed = [string](Get-Content -Raw -LiteralPath $LocalStatePath | ConvertFrom-Json).profile.last_used
-        if ($lastUsed -notmatch '^[A-Za-z0-9 ._-]+$') { return $null }
-        if (-not (Test-Path -LiteralPath (Join-Path $UserDataRoot $lastUsed) -PathType Container)) { return $null }
-        return $lastUsed
-    } catch {
-        return $null
-    }
-}
-
-function Get-CompanionBrowser {
-    $chromeUserData = Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data'
-    $edgeUserData = Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data'
+function Get-CompanionBrowsers {
     $chromePath = Find-BrowserExecutable 'chrome.exe' @(
         (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
         (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
@@ -80,34 +47,24 @@ function Get-CompanionBrowser {
         (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe')
     )
     $defaultProgId = Get-DefaultHttpsProgId
-    $candidates = if ($defaultProgId -match '(?i)^ChromeHTML') {
-        @('chrome', 'msedge')
-    } elseif ($defaultProgId -match '(?i)^MSEdgeHTM') {
-        @('msedge', 'chrome')
-    } else {
-        @('chrome', 'msedge')
-    }
-    foreach ($candidate in $candidates) {
-        if ($candidate -eq 'chrome' -and $chromePath) {
-            return [pscustomobject]@{
-                Name = 'Google Chrome'
-                ProcessName = 'chrome'
-                ExecutablePath = $chromePath
-                ProfileDirectory = Get-LastUsedProfileDirectory (Join-Path $chromeUserData 'Local State') $chromeUserData
-                IsRegisteredDefault = $defaultProgId -match '(?i)^ChromeHTML'
-            }
-        }
-        if ($candidate -eq 'msedge' -and $edgePath) {
-            return [pscustomobject]@{
-                Name = 'Microsoft Edge'
-                ProcessName = 'msedge'
-                ExecutablePath = $edgePath
-                ProfileDirectory = Get-LastUsedProfileDirectory (Join-Path $edgeUserData 'Local State') $edgeUserData
-                IsRegisteredDefault = $defaultProgId -match '(?i)^MSEdgeHTM'
-            }
+    $available = @()
+    if ($chromePath) {
+        $available += [pscustomobject]@{
+            Name = 'Google Chrome'
+            ProcessName = 'chrome'
+            ExecutablePath = $chromePath
+            IsRegisteredDefault = $defaultProgId -match '(?i)^ChromeHTML'
         }
     }
-    return $null
+    if ($edgePath) {
+        $available += [pscustomobject]@{
+            Name = 'Microsoft Edge'
+            ProcessName = 'msedge'
+            ExecutablePath = $edgePath
+            IsRegisteredDefault = $defaultProgId -match '(?i)^MSEdgeHTM'
+        }
+    }
+    @($available | Sort-Object @{ Expression = { -not $_.IsRegisteredDefault } }, Name)
 }
 
 if ($env:OS -ne 'Windows_NT') {
@@ -118,15 +75,58 @@ if ($env:OS -ne 'Windows_NT') {
     exit 3
 }
 
-Add-Type -AssemblyName System.Windows.Forms
-if ($null -eq ('CogentStackChatDesktopWindow' -as [type])) {
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+if ($null -eq ('CogentStackWorkspaceWindows' -as [type])) {
     Add-Type @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 
-public static class CogentStackChatDesktopWindow {
+public static class CogentStackWorkspaceWindows {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MONITORINFO {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public int dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder value, int capacity);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
@@ -141,54 +141,42 @@ public static class CogentStackChatDesktopWindow {
     public static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
-    public static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     [DllImport("user32.dll")]
-    public static extern uint GetDpiForWindow(IntPtr hWnd);
+    public static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
+
+    public static IntPtr[] GetTopLevelWindows() {
+        var windows = new List<IntPtr>();
+        EnumWindows((handle, ignored) => {
+            if (IsWindowVisible(handle) && GetWindowTextLength(handle) > 0) windows.Add(handle);
+            return true;
+        }, IntPtr.Zero);
+        return windows.ToArray();
+    }
+
+    public static string GetWindowTitle(IntPtr hWnd) {
+        var value = new StringBuilder(GetWindowTextLength(hWnd) + 1);
+        GetWindowText(hWnd, value, value.Capacity);
+        return value.ToString();
+    }
 }
 '@
 }
 
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
 $statePath = Join-Path $stateRoot 'chatgpt-companion-layout.json'
-
-function Read-LayoutState {
-    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { return $null }
-    try { return Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json } catch { return $null }
-}
-
-function Find-RememberedWindow($State, [string]$Kind) {
-    if ($null -eq $State) { return $null }
-    $handleProperty = if ($Kind -eq 'panel') { 'panelHandle' } else { 'chatDesktopHandle' }
-    $processProperty = if ($Kind -eq 'panel') { 'panelProcessId' } else { 'chatDesktopProcessId' }
-    $expectedHandle = [Int64]$State.$handleProperty
-    $expectedProcess = [int]$State.$processProperty
-    if ($expectedHandle -eq 0 -or $expectedProcess -le 0 -or -not [CogentStackChatDesktopWindow]::IsWindow([IntPtr]$expectedHandle)) {
-        return $null
-    }
-    [uint32]$actualProcess = 0
-    [CogentStackChatDesktopWindow]::GetWindowThreadProcessId([IntPtr]$expectedHandle, [ref]$actualProcess) | Out-Null
-    $process = Get-Process -Id $expectedProcess -ErrorAction SilentlyContinue
-    if ([int]$actualProcess -ne $expectedProcess -or -not $process) {
-        return $null
-    }
-    [pscustomobject]@{
-        Handle = $expectedHandle
-        ProcessId = $expectedProcess
-        ProcessName = if ($Kind -eq 'panel') { [string]$process.ProcessName } else { 'ChatGPT/Codex' }
-        Title = ''
-    }
-}
+$backdropTitle = 'CogentStack Workspace Backdrop'
 
 function Get-WindowRectangle([Int64]$Handle) {
-    $rectangle = New-Object CogentStackChatDesktopWindow+RECT
-    if (-not [CogentStackChatDesktopWindow]::GetWindowRect([IntPtr]$Handle, [ref]$rectangle)) { return $null }
+    $rectangle = New-Object CogentStackWorkspaceWindows+RECT
+    if (-not [CogentStackWorkspaceWindows]::GetWindowRect([IntPtr]$Handle, [ref]$rectangle)) { return $null }
     [ordered]@{
         x = $rectangle.Left
         y = $rectangle.Top
@@ -197,20 +185,79 @@ function Get-WindowRectangle([Int64]$Handle) {
     }
 }
 
-function Move-DesktopWindow($Window, [int]$X, [int]$Y, [int]$Width, [int]$Height) {
-    [CogentStackChatDesktopWindow]::ShowWindow([IntPtr]$Window.Handle, 9) | Out-Null
-    if (-not [CogentStackChatDesktopWindow]::MoveWindow([IntPtr]$Window.Handle, $X, $Y, $Width, $Height, $true)) {
-        throw "Windows could not position the $($Window.ProcessName) window."
+function Get-DesktopWindows {
+    $foregroundHandle = [Int64][CogentStackWorkspaceWindows]::GetForegroundWindow()
+    @([CogentStackWorkspaceWindows]::GetTopLevelWindows() | ForEach-Object {
+        $windowHandle = [Int64]$_
+        [uint32]$windowProcessId = 0
+        [CogentStackWorkspaceWindows]::GetWindowThreadProcessId([IntPtr]$windowHandle, [ref]$windowProcessId) | Out-Null
+        $windowProcess = Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
+        if ($windowProcess) {
+            $rectangle = Get-WindowRectangle $windowHandle
+            [pscustomobject]@{
+                Handle = $windowHandle
+                ProcessId = [int]$windowProcessId
+                ProcessName = [string]$windowProcess.ProcessName
+                Title = [CogentStackWorkspaceWindows]::GetWindowTitle([IntPtr]$windowHandle)
+                IsForeground = $windowHandle -eq $foregroundHandle
+                IsMinimized = [CogentStackWorkspaceWindows]::IsIconic([IntPtr]$windowHandle)
+                Area = if ($rectangle) { [int64]$rectangle.width * [int64]$rectangle.height } else { 0 }
+            }
+        }
+    })
+}
+
+function Get-ChatDesktopWindow {
+    $candidates = @(Get-DesktopWindows | Where-Object {
+        $_.ProcessName -match '(?i)^(chatgpt|codex)(?:[-_. ].*)?$' -and $_.Title -match '(?i)(chatgpt|codex)'
+    })
+    $foreground = @($candidates | Where-Object { $_.IsForeground } | Select-Object -First 1)
+    if ($foreground) { return $foreground }
+    @($candidates | Where-Object { -not $_.IsMinimized } | Sort-Object @(
+        @{ Expression = 'Area'; Descending = $true },
+        @{ Expression = 'ProcessId'; Descending = $true }
+    ) | Select-Object -First 1)
+}
+
+function Get-VisibleWindowRectangle([Int64]$Handle) {
+    $rectangle = New-Object CogentStackWorkspaceWindows+RECT
+    $result = [CogentStackWorkspaceWindows]::DwmGetWindowAttribute(
+        [IntPtr]$Handle,
+        9,
+        [ref]$rectangle,
+        [Runtime.InteropServices.Marshal]::SizeOf($rectangle)
+    )
+    if ($result -ne 0) { return Get-WindowRectangle $Handle }
+    [ordered]@{
+        x = $rectangle.Left
+        y = $rectangle.Top
+        width = $rectangle.Right - $rectangle.Left
+        height = $rectangle.Bottom - $rectangle.Top
+    }
+}
+
+function Get-MonitorWorkingArea([Int64]$Handle) {
+    $monitor = [CogentStackWorkspaceWindows]::MonitorFromWindow([IntPtr]$Handle, 2)
+    $info = New-Object CogentStackWorkspaceWindows+MONITORINFO
+    $info.cbSize = [Runtime.InteropServices.Marshal]::SizeOf($info)
+    if ($monitor -eq [IntPtr]::Zero -or -not [CogentStackWorkspaceWindows]::GetMonitorInfo($monitor, [ref]$info)) {
+        throw 'Windows could not determine the current monitor work area.'
+    }
+    [ordered]@{
+        x = $info.rcWork.Left
+        y = $info.rcWork.Top
+        width = $info.rcWork.Right - $info.rcWork.Left
+        height = $info.rcWork.Bottom - $info.rcWork.Top
     }
 }
 
 function Get-VisibleFrameInsets($Window) {
-    $windowRectangle = New-Object CogentStackChatDesktopWindow+RECT
-    $visibleRectangle = New-Object CogentStackChatDesktopWindow+RECT
-    if (-not [CogentStackChatDesktopWindow]::GetWindowRect([IntPtr]$Window.Handle, [ref]$windowRectangle)) {
+    $windowRectangle = New-Object CogentStackWorkspaceWindows+RECT
+    $visibleRectangle = New-Object CogentStackWorkspaceWindows+RECT
+    if (-not [CogentStackWorkspaceWindows]::GetWindowRect([IntPtr]$Window.Handle, [ref]$windowRectangle)) {
         return [ordered]@{ left = 0; top = 0; right = 0; bottom = 0 }
     }
-    $result = [CogentStackChatDesktopWindow]::DwmGetWindowAttribute(
+    $result = [CogentStackWorkspaceWindows]::DwmGetWindowAttribute(
         [IntPtr]$Window.Handle,
         9,
         [ref]$visibleRectangle,
@@ -227,8 +274,14 @@ function Get-VisibleFrameInsets($Window) {
     }
 }
 
+function Move-DesktopWindow($Window, [int]$X, [int]$Y, [int]$Width, [int]$Height) {
+    [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Window.Handle, 9) | Out-Null
+    if (-not [CogentStackWorkspaceWindows]::MoveWindow([IntPtr]$Window.Handle, $X, $Y, $Width, $Height, $true)) {
+        throw "Windows could not position the $($Window.ProcessName) window."
+    }
+}
+
 function Move-VisibleDesktopWindow($Window, [int]$X, [int]$Y, [int]$Width, [int]$Height) {
-    [CogentStackChatDesktopWindow]::ShowWindow([IntPtr]$Window.Handle, 9) | Out-Null
     $insets = Get-VisibleFrameInsets $Window
     Move-DesktopWindow `
         $Window `
@@ -238,131 +291,361 @@ function Move-VisibleDesktopWindow($Window, [int]$X, [int]$Y, [int]$Width, [int]
         ($Height + [int]$insets.top + [int]$insets.bottom)
 }
 
-function Restore-ChatDesktopWindow($State) {
-    $chatDesktopWindow = Find-RememberedWindow $State 'chatDesktop'
-    if ($chatDesktopWindow -and $State.chatDesktopOriginal) {
-        $original = $State.chatDesktopOriginal
-        Move-DesktopWindow $chatDesktopWindow ([int]$original.x) ([int]$original.y) ([int]$original.width) ([int]$original.height)
+function Read-LayoutState {
+    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { return $null }
+    try { return Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json } catch { return $null }
+}
+
+function Find-RememberedWindow($State, [string]$Kind) {
+    if ($null -eq $State) { return $null }
+    $handleProperty = switch ($Kind) {
+        'panel' { 'panelHandle' }
+        'backdrop' { 'backdropHandle' }
+        default { 'chatDesktopHandle' }
+    }
+    $processProperty = switch ($Kind) {
+        'panel' { 'panelProcessId' }
+        'backdrop' { 'backdropProcessId' }
+        default { 'chatDesktopProcessId' }
+    }
+    if (-not $State.PSObject.Properties[$handleProperty] -or -not $State.PSObject.Properties[$processProperty]) { return $null }
+    $expectedHandle = [Int64]$State.$handleProperty
+    $expectedProcessId = [int]$State.$processProperty
+    if ($expectedHandle -eq 0 -or $expectedProcessId -le 0 -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$expectedHandle)) {
+        return $null
+    }
+    [uint32]$actualProcessId = 0
+    [CogentStackWorkspaceWindows]::GetWindowThreadProcessId([IntPtr]$expectedHandle, [ref]$actualProcessId) | Out-Null
+    $windowProcess = Get-Process -Id $expectedProcessId -ErrorAction SilentlyContinue
+    if ([int]$actualProcessId -ne $expectedProcessId -or -not $windowProcess) { return $null }
+    [pscustomobject]@{
+        Handle = $expectedHandle
+        ProcessId = $expectedProcessId
+        ProcessName = [string]$windowProcess.ProcessName
+        Title = [CogentStackWorkspaceWindows]::GetWindowTitle([IntPtr]$expectedHandle)
+    }
+}
+
+function Get-AccountState($Window) {
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
+        $elements = $root.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )
+        $signedOut = $false
+        foreach ($element in $elements) {
+            $name = [string]$element.Current.Name
+            if ($name -match '(?i)^Open account for .+CogentStack website$' -or $name -match '(?i)^View subscriptions') {
+                return 'signed_in'
+            }
+            if ($name -match '(?i)^Sign in(?:\s|$)') { $signedOut = $true }
+        }
+        if ($signedOut) { return 'signed_out' }
+    } catch {}
+    return 'unknown'
+}
+
+function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
+    $results = @()
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
+        $tabCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::TabItem
+        )
+        $tabs = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCondition)
+        foreach ($tab in $tabs) {
+            if ([string]$tab.Current.Name -notmatch '(?i)^CogentStack \| Create or open a project(?:\s+-\s+Memory usage.*)?$') { continue }
+            $accountState = 'unknown'
+            if ($SelectTabs) {
+                $selectionPattern = $null
+                if ($tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) {
+                    ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Select()
+                    Start-Sleep -Milliseconds 500
+                    $accountState = Get-AccountState $Window
+                }
+            }
+            $results += [pscustomobject]@{
+                Window = $Window
+                Browser = $Browser
+                AccountState = $accountState
+                ReusedExistingTab = $true
+                HasTabStrip = $true
+            }
+        }
+        if ($results.Count -eq 0 -and $Window.Title -match '(?i)^CogentStack \| Create or open a project') {
+            $results += [pscustomobject]@{
+                Window = $Window
+                Browser = $Browser
+                AccountState = if ($SelectTabs) { Get-AccountState $Window } else { 'unknown' }
+                ReusedExistingTab = $true
+                HasTabStrip = $tabs.Count -gt 0
+            }
+        }
+    } catch {
+        if ($Window.Title -match '(?i)^CogentStack \| Create or open a project') {
+            $results += [pscustomobject]@{
+                Window = $Window
+                Browser = $Browser
+                AccountState = 'unknown'
+                ReusedExistingTab = $true
+                HasTabStrip = $false
+            }
+        }
+    }
+    @($results)
+}
+
+function Find-ExistingCogentStackWindow($Browsers, [bool]$SelectTabs) {
+    $candidates = @()
+    $desktopWindows = @(Get-DesktopWindows)
+    foreach ($candidateBrowser in $Browsers) {
+        foreach ($browserWindow in @($desktopWindows | Where-Object { $_.ProcessName -eq $candidateBrowser.ProcessName })) {
+            $candidates += @(Get-CogentStackTabCandidates $browserWindow $candidateBrowser $SelectTabs)
+        }
+    }
+    $signedIn = @($candidates | Where-Object { $_.AccountState -eq 'signed_in' } | Select-Object -First 1)
+    if ($signedIn) { return $signedIn }
+    $normalWindow = @($candidates | Where-Object { $_.HasTabStrip } | Select-Object -First 1)
+    if ($normalWindow) { return $normalWindow }
+    @($candidates | Select-Object -First 1)
+}
+
+function Find-BackdropWindow {
+    @(Get-DesktopWindows | Where-Object { $_.Title -eq $backdropTitle -and $_.ProcessName -match '(?i)^(powershell|pwsh)$' } | Select-Object -First 1)
+}
+
+function Start-WhiteBackdrop($Area) {
+    $existing = @(Find-BackdropWindow | Select-Object -First 1)
+    if ($existing) {
+        Move-DesktopWindow $existing ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
+        return $existing
+    }
+
+    $backdropScript = @"
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class CogentStackBackdropDpi {
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+}
+'@
+[CogentStackBackdropDpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+`$form = New-Object System.Windows.Forms.Form
+`$form.Text = '$backdropTitle'
+`$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+`$form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+`$form.Bounds = New-Object System.Drawing.Rectangle($([int]$Area.x), $([int]$Area.y), $([int]$Area.width), $([int]$Area.height))
+`$form.BackColor = [System.Drawing.Color]::White
+`$form.ShowInTaskbar = `$false
+`$form.ShowIcon = `$false
+`$form.TopMost = `$false
+[System.Windows.Forms.Application]::Run(`$form)
+"@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($backdropScript))
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    $powershellPath = if ($powershellCommand) { [string]$powershellCommand.Source } else { $null }
+    if (-not $powershellPath) { throw 'Windows PowerShell is required to display the white CogentStack workspace background.' }
+    $backdropProcess = Start-Process -FilePath $powershellPath -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded) -WindowStyle Hidden -PassThru
+    $backdrop = $null
+    for ($attempt = 0; $attempt -lt 30 -and -not $backdrop; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        $backdrop = @(Get-DesktopWindows | Where-Object { $_.ProcessId -eq $backdropProcess.Id -and $_.Title -eq $backdropTitle } | Select-Object -First 1)
+    }
+    if (-not $backdrop) { throw 'Windows could not create the white CogentStack workspace background.' }
+    return $backdrop
+}
+
+function Restore-Window($Window, $Rectangle) {
+    if ($Window -and $Rectangle) {
+        Move-DesktopWindow $Window ([int]$Rectangle.x) ([int]$Rectangle.y) ([int]$Rectangle.width) ([int]$Rectangle.height)
+    }
+}
+
+function Test-WorkspaceLayout($Area, $ChatWindow, $PanelWindow) {
+    $chat = Get-VisibleWindowRectangle $ChatWindow.Handle
+    $panel = Get-VisibleWindowRectangle $PanelWindow.Handle
+    $chatRight = [int]$chat.x + [int]$chat.width
+    $panelRight = [int]$panel.x + [int]$panel.width
+    $areaRight = [int]$Area.x + [int]$Area.width
+    $chatBottom = [int]$chat.y + [int]$chat.height
+    $panelBottom = [int]$panel.y + [int]$panel.height
+    $areaBottom = [int]$Area.y + [int]$Area.height
+    $tolerance = 1
+    [ordered]@{
+        verified = (
+            [Math]::Abs([int]$chat.x - [int]$Area.x) -le $tolerance -and
+            [Math]::Abs([int]$chat.y - [int]$Area.y) -le $tolerance -and
+            [Math]::Abs($chatRight - [int]$panel.x) -le $tolerance -and
+            [Math]::Abs([int]$panel.y - [int]$Area.y) -le $tolerance -and
+            [Math]::Abs([int]$chat.width - [int]$panel.width) -le $tolerance -and
+            [Math]::Abs($panelRight - $areaRight) -le $tolerance -and
+            [Math]::Abs($chatBottom - $areaBottom) -le $tolerance -and
+            [Math]::Abs($panelBottom - $areaBottom) -le $tolerance
+        )
+        joined = [Math]::Abs($chatRight - [int]$panel.x) -le $tolerance
+        equalWidth = [Math]::Abs([int]$chat.width - [int]$panel.width) -le $tolerance
+        topAligned = [Math]::Abs([int]$chat.y - [int]$panel.y) -le $tolerance
+        chat = $chat
+        panel = $panel
     }
 }
 
 $state = Read-LayoutState
-$rememberedPanel = Find-RememberedWindow $state 'panel'
-$browser = Get-CompanionBrowser
+$browsers = @(Get-CompanionBrowsers)
 $chatDesktopWindow = @(Get-ChatDesktopWindow | Select-Object -First 1)
 
 if ($Mode -eq 'Inspect') {
+    $existingPanel = @(Find-ExistingCogentStackWindow $browsers $false | Select-Object -First 1)
     Write-CompactJson ([ordered]@{
         status = 'inspected'
         platform = 'windows'
         chatDesktopWindowFound = [bool]$chatDesktopWindow
-        companionWindowFound = [bool]$rememberedPanel
-        browserAvailable = [bool]$browser
-        browser = if ($browser) { [string]$browser.Name } else { $null }
-        registeredDefault = if ($browser) { [bool]$browser.IsRegisteredDefault } else { $false }
+        existingCogentStackWindowFound = [bool]$existingPanel
+        browserAvailable = $browsers.Count -gt 0
+        browser = if ($existingPanel) { [string]$existingPanel.Browser.Name } elseif ($browsers.Count -gt 0) { [string]$browsers[0].Name } else { $null }
+        registeredDefault = if ($existingPanel) { [bool]$existingPanel.Browser.IsRegisteredDefault } elseif ($browsers.Count -gt 0) { [bool]$browsers[0].IsRegisteredDefault } else { $false }
+        launchMode = 'reuse-existing-browser-tab'
+        whiteBackdrop = [bool](Find-BackdropWindow)
     })
     exit 0
 }
 
 if ($Mode -in @('Hide', 'Close')) {
-    if ($rememberedPanel) {
+    $rememberedChat = Find-RememberedWindow $state 'chatDesktop'
+    $rememberedPanel = Find-RememberedWindow $state 'panel'
+    $rememberedBackdrop = Find-RememberedWindow $state 'backdrop'
+    if ($rememberedBackdrop) {
         if ($Mode -eq 'Hide') {
-            [CogentStackChatDesktopWindow]::ShowWindow([IntPtr]$rememberedPanel.Handle, 0) | Out-Null
+            [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$rememberedBackdrop.Handle, 0) | Out-Null
         } else {
-            [CogentStackChatDesktopWindow]::PostMessage([IntPtr]$rememberedPanel.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$rememberedBackdrop.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
     }
-    Restore-ChatDesktopWindow $state
+    if ($state) {
+        Restore-Window $rememberedChat $state.chatDesktopOriginal
+        if ($state.PSObject.Properties['panelOriginal']) { Restore-Window $rememberedPanel $state.panelOriginal }
+    }
     if ($Mode -eq 'Close' -and (Test-Path -LiteralPath $statePath)) {
         Remove-Item -LiteralPath $statePath -Force
     }
-    Write-CompactJson ([ordered]@{ status = $Mode.ToLowerInvariant(); panelFound = [bool]$rememberedPanel })
+    Write-CompactJson ([ordered]@{
+        status = $Mode.ToLowerInvariant()
+        browserWindowRestored = [bool]$rememberedPanel
+        backdropFound = [bool]$rememberedBackdrop
+    })
     exit 0
 }
 
 $safeUrl = Confirm-CogentStackUrl $Url
-$panelWindow = $rememberedPanel
-if ($panelWindow -and $browser -and $panelWindow.ProcessName -ne $browser.ProcessName) {
-    [CogentStackChatDesktopWindow]::PostMessage([IntPtr]$panelWindow.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-    $panelWindow = $null
-    Start-Sleep -Milliseconds 300
+if ($browsers.Count -eq 0) {
+    Write-CompactJson ([ordered]@{
+        status = 'browser_unavailable'
+        message = 'Google Chrome or Microsoft Edge is required for the CogentStack companion workspace.'
+    })
+    exit 2
 }
-if (-not $panelWindow) {
-    if (-not $browser) {
-        Write-CompactJson ([ordered]@{
-            status = 'browser_unavailable'
-            message = 'Google Chrome or Microsoft Edge is required for the installer-free CogentStack companion panel.'
-        })
-        exit 2
-    }
 
-    $beforeHandles = @{}
-    Get-DesktopWindows | Where-Object { $_.ProcessName -eq $browser.ProcessName } | ForEach-Object { $beforeHandles[[string]$_.Handle] = $true }
-    $browserArguments = @("--app=$safeUrl", '--new-window')
-    if ($browser.ProfileDirectory) { $browserArguments += "--profile-directory=$($browser.ProfileDirectory)" }
-    Start-Process -FilePath $browser.ExecutablePath -ArgumentList $browserArguments | Out-Null
-
-    for ($attempt = 0; $attempt -lt 50 -and -not $panelWindow; $attempt++) {
-        Start-Sleep -Milliseconds 200
-        $newBrowserWindows = @(Get-DesktopWindows | Where-Object {
-            $_.ProcessName -eq $browser.ProcessName -and -not $beforeHandles.ContainsKey([string]$_.Handle)
-        })
-        $panelWindow = @($newBrowserWindows | Where-Object { $_.Title -match '(?i)cogentstack' } | Select-Object -First 1)
-        if (-not $panelWindow -and $newBrowserWindows.Count -eq 1) { $panelWindow = $newBrowserWindows[0] }
+$panelSelection = @(Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1)
+$openedNewTab = $false
+if (-not $panelSelection) {
+    $preferredBrowser = $browsers[0]
+    Start-Process -FilePath $preferredBrowser.ExecutablePath -ArgumentList @($safeUrl) | Out-Null
+    $openedNewTab = $true
+    for ($attempt = 0; $attempt -lt 40 -and -not $panelSelection; $attempt++) {
+        Start-Sleep -Milliseconds 250
+        $panelSelection = @(Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1)
     }
 }
 
-if (-not $panelWindow) {
+if (-not $panelSelection) {
     Write-CompactJson ([ordered]@{
         status = 'opened_unarranged'
-        message = 'CogentStack was opened, but its new app window could not be identified safely.'
+        message = 'CogentStack was opened in the normal browser, but its exact window could not be identified safely.'
     })
     exit 0
 }
 
-[CogentStackChatDesktopWindow]::ShowWindow([IntPtr]$panelWindow.Handle, 9) | Out-Null
+$panelWindow = $panelSelection.Window
+$browser = $panelSelection.Browser
+[CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$panelWindow.Handle, 9) | Out-Null
 if (-not $chatDesktopWindow) {
     Write-CompactJson ([ordered]@{
         status = 'opened_unarranged'
-        message = 'CogentStack is open. No active ChatGPT or Codex window was available for automatic layout.'
+        message = 'CogentStack is open in the normal browser. No active ChatGPT or Codex window was available for automatic layout.'
+        browser = [string]$browser.Name
+        accountState = [string]$panelSelection.AccountState
     })
     exit 0
 }
 
-$originalRectangle = if ($state -and $state.chatDesktopOriginal) { $state.chatDesktopOriginal } else { Get-WindowRectangle $chatDesktopWindow.Handle }
-$screen = [System.Windows.Forms.Screen]::FromHandle([IntPtr]$chatDesktopWindow.Handle)
-$area = $screen.WorkingArea
-$gutter = 0
-$chatDesktopWidth = [Math]::Floor($area.Width / 2)
-$panelWidth = $area.Width - $chatDesktopWidth
-$dpi = [CogentStackChatDesktopWindow]::GetDpiForWindow([IntPtr]$panelWindow.Handle)
-if ($dpi -le 0) { $dpi = 96 }
-$panelTopOffset = [Math]::Max(0, [Math]::Round(12 * ($dpi / 96)))
+$oldRememberedPanel = Find-RememberedWindow $state 'panel'
+if ($state -and $state.PSObject.Properties['schemaVersion'] -and [int]$state.schemaVersion -lt 2 -and $oldRememberedPanel -and [Int64]$oldRememberedPanel.Handle -ne [Int64]$panelWindow.Handle) {
+    [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$oldRememberedPanel.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+}
 
-Move-VisibleDesktopWindow $chatDesktopWindow $area.X $area.Y $chatDesktopWidth $area.Height
-Move-VisibleDesktopWindow $panelWindow ($area.X + $chatDesktopWidth) ($area.Y + $panelTopOffset) $panelWidth ($area.Height - $panelTopOffset)
+$chatOriginal = if ($state -and $state.PSObject.Properties['chatDesktopHandle'] -and [Int64]$state.chatDesktopHandle -eq [Int64]$chatDesktopWindow.Handle -and $state.PSObject.Properties['chatDesktopOriginal']) {
+    $state.chatDesktopOriginal
+} else {
+    Get-WindowRectangle $chatDesktopWindow.Handle
+}
+$panelOriginal = if ($state -and $state.PSObject.Properties['panelHandle'] -and [Int64]$state.panelHandle -eq [Int64]$panelWindow.Handle -and $state.PSObject.Properties['panelOriginal']) {
+    $state.panelOriginal
+} else {
+    Get-WindowRectangle $panelWindow.Handle
+}
 
+$area = Get-MonitorWorkingArea $chatDesktopWindow.Handle
+$chatDesktopWidth = [Math]::Floor([int]$area.width / 2)
+$panelWidth = [int]$area.width - $chatDesktopWidth
+$backdrop = Start-WhiteBackdrop $area
+
+Move-VisibleDesktopWindow $chatDesktopWindow ([int]$area.x) ([int]$area.y) $chatDesktopWidth ([int]$area.height)
+Move-VisibleDesktopWindow $panelWindow ([int]$area.x + $chatDesktopWidth) ([int]$area.y) $panelWidth ([int]$area.height)
+[CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$chatDesktopWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
+[CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$panelWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
+[CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$panelWindow.Handle) | Out-Null
+[CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$chatDesktopWindow.Handle) | Out-Null
+[CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$chatDesktopWindow.Handle) | Out-Null
+Start-Sleep -Milliseconds 200
+
+$layout = Test-WorkspaceLayout $area $chatDesktopWindow $panelWindow
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
-    chatDesktopOriginal = $originalRectangle
+    chatDesktopOriginal = $chatOriginal
     panelHandle = [Int64]$panelWindow.Handle
     panelProcessId = [int]$panelWindow.ProcessId
     panelProcessName = [string]$panelWindow.ProcessName
+    panelOriginal = $panelOriginal
+    backdropHandle = [Int64]$backdrop.Handle
+    backdropProcessId = [int]$backdrop.ProcessId
     browser = [string]$browser.Name
+    accountState = [string]$panelSelection.AccountState
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
 } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 
 Write-CompactJson ([ordered]@{
-    status = 'arranged'
+    status = if ($layout.verified) { 'arranged' } else { 'opened_unarranged' }
     layout = 'equal-split-chatgpt-left-cogentstack-right'
+    layoutVerified = [bool]$layout.verified
+    joined = [bool]$layout.joined
+    equalWidth = [bool]$layout.equalWidth
+    topAligned = [bool]$layout.topAligned
     splitPercent = 50
-    gutter = $gutter
-    panelWidth = $panelWidth
-    panelTopOffset = $panelTopOffset
+    gutter = 0
+    whiteBackdrop = $true
     browser = [string]$browser.Name
     registeredDefault = [bool]$browser.IsRegisteredDefault
-    screen = [string]$screen.DeviceName
+    reusedExistingTab = [bool]$panelSelection.ReusedExistingTab
+    openedNewTab = $openedNewTab
+    accountState = [string]$panelSelection.AccountState
+    chatFrame = $layout.chat
+    panelFrame = $layout.panel
 })

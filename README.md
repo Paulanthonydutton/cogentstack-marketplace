@@ -26,7 +26,7 @@ Claude Web is intentionally outside this package. It will use a separate remote-
 
 ## ChatGPT and Codex Desktop
 
-The Codex plugin is installed from the Git-backed `.agents/plugins/` marketplace and retains `$cogentstack` as the common invocation. On Windows its default helper opens the protected `surface=chatgpt` workspace with the registered HTTPS browser—Chrome or Edge—and that browser's last-used normal profile, hides the ChatGPT/Codex sidebar, and uses visible-frame measurements to arrange a joined 50/50 workspace with no gutter and aligned top bars. This preserves the website login already held by that browser profile without copying cookies or credentials, and avoids queued native panel mounts and duplicate tabs.
+The Codex plugin is installed from the Git-backed `.agents/plugins/` marketplace and retains `$cogentstack` as the common invocation. On Windows its default helper selects the exact existing `surface=chatgpt` tab in Chrome or Edge through Windows accessibility, reuses that signed-in page's owning normal browser window, hides the ChatGPT/Codex sidebar, places a white backdrop across the Windows work area, and verifies a joined 50/50 workspace with no gutter and aligned top edges. Only when no matching tab exists does it open the exact hosted URL once as a normal tab in the registered browser. It never launches a separate app-mode window, guesses a browser profile, reads or copies cookies, queues a native panel mount, or creates a duplicate after finding the existing tab.
 
 The native in-Codex panel remains available only when the user explicitly asks to keep CogentStack inside Codex. That panel has an isolated browser session, cannot inherit Edge or Chrome login cookies, and uses the separate one-time Desktop authorization flow.
 
