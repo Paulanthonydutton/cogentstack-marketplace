@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Inspect', 'Open', 'Hide', 'Close')]
+    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'WatchExit')]
     [string]$Mode = 'Open',
     [string]$Url = 'https://cogentstack.app/stack?surface=chatgpt'
 )
@@ -445,6 +445,28 @@ function Get-AccountState($Window) {
     return 'unknown'
 }
 
+function Get-BrowserAddressValue($Window) {
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
+        $addressCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Address and search bar'
+        )
+        $address = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $addressCondition)
+        if (-not $address) { return '' }
+        $valuePattern = $null
+        if ($address.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+            return [string]([System.Windows.Automation.ValuePattern]$valuePattern).Current.Value
+        }
+    } catch {}
+    return ''
+}
+
+function Test-CompanionExitAddress([string]$Address) {
+    if (-not $Address) { return $false }
+    return $Address -match '^(?:https?://)?(?:www\.)?cogentstack\.app/?\?companion=close(?:#.*)?$'
+}
+
 function Get-WebDocumentRectangle($Window) {
     try {
         $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
@@ -740,6 +762,53 @@ function Restore-BrowserWindow($Window, $Rectangle, $Style) {
     }
 }
 
+function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState) {
+    $rememberedChat = Find-RememberedWindow $State 'chatDesktop'
+    $rememberedPanel = Find-RememberedWindow $State 'panel'
+    $rememberedBackdrop = Find-RememberedWindow $State 'backdrop'
+    if ($rememberedBackdrop) {
+        if ($HideBackdrop) {
+            [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$rememberedBackdrop.Handle, 0) | Out-Null
+        } else {
+            [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$rememberedBackdrop.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
+    }
+    if ($State) {
+        Restore-Window $rememberedChat $State.chatDesktopOriginal
+        if ($State.PSObject.Properties['panelOriginal']) {
+            $rememberedStyle = if ($State.PSObject.Properties['panelOriginalStyle']) { [Int64]$State.panelOriginalStyle } else { $null }
+            Restore-BrowserWindow $rememberedPanel $State.panelOriginal $rememberedStyle
+        }
+    }
+    if ($RemoveState -and (Test-Path -LiteralPath $statePath)) {
+        Remove-Item -LiteralPath $statePath -Force
+    }
+    if ($rememberedPanel) {
+        [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$rememberedPanel.Handle) | Out-Null
+        [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$rememberedPanel.Handle) | Out-Null
+    }
+    return [ordered]@{
+        browserWindowRestored = [bool]$rememberedPanel
+        backdropFound = [bool]$rememberedBackdrop
+    }
+}
+
+function Start-CompanionExitWatcher {
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    $powershellPath = if ($powershellCommand) { [string]$powershellCommand.Source } else { $null }
+    if (-not $powershellPath) { throw 'Windows PowerShell is required to monitor the CogentStack companion exit control.' }
+    Start-Process -FilePath $powershellPath -ArgumentList @(
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        $PSCommandPath,
+        '-Mode',
+        'WatchExit'
+    ) -WindowStyle Hidden -PassThru
+}
+
 function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter) {
     $chat = Get-VisibleWindowRectangle $ChatWindow.Handle
     $panel = $PanelFrame
@@ -775,6 +844,30 @@ $state = Read-LayoutState
 $browsers = @(Get-CompanionBrowsers)
 $chatDesktopWindow = @(Get-ChatDesktopWindow | Select-Object -First 1)
 
+if ($Mode -eq 'WatchExit') {
+    $watcherMutex = New-Object System.Threading.Mutex($false, 'Local\CogentStackCompanionExitWatcher')
+    $ownsMutex = $false
+    try {
+        $ownsMutex = $watcherMutex.WaitOne(0)
+        if (-not $ownsMutex) { exit 0 }
+        while ($true) {
+            $watchState = Read-LayoutState
+            if (-not $watchState) { break }
+            $watchPanel = Find-RememberedWindow $watchState 'panel'
+            if (-not $watchPanel) { break }
+            if (Test-CompanionExitAddress (Get-BrowserAddressValue $watchPanel)) {
+                Restore-CompanionLayout $watchState $false $true | Out-Null
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        }
+    } finally {
+        if ($ownsMutex) { $watcherMutex.ReleaseMutex() }
+        $watcherMutex.Dispose()
+    }
+    exit 0
+}
+
 if ($Mode -eq 'Inspect') {
     $existingPanel = @(Find-ExistingCogentStackWindow $browsers $false | Select-Object -First 1)
     Write-CompactJson ([ordered]@{
@@ -794,30 +887,11 @@ if ($Mode -eq 'Inspect') {
 }
 
 if ($Mode -in @('Hide', 'Close')) {
-    $rememberedChat = Find-RememberedWindow $state 'chatDesktop'
-    $rememberedPanel = Find-RememberedWindow $state 'panel'
-    $rememberedBackdrop = Find-RememberedWindow $state 'backdrop'
-    if ($rememberedBackdrop) {
-        if ($Mode -eq 'Hide') {
-            [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$rememberedBackdrop.Handle, 0) | Out-Null
-        } else {
-            [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$rememberedBackdrop.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-        }
-    }
-    if ($state) {
-        Restore-Window $rememberedChat $state.chatDesktopOriginal
-        if ($state.PSObject.Properties['panelOriginal']) {
-            $rememberedStyle = if ($state.PSObject.Properties['panelOriginalStyle']) { [Int64]$state.panelOriginalStyle } else { $null }
-            Restore-BrowserWindow $rememberedPanel $state.panelOriginal $rememberedStyle
-        }
-    }
-    if ($Mode -eq 'Close' -and (Test-Path -LiteralPath $statePath)) {
-        Remove-Item -LiteralPath $statePath -Force
-    }
+    $restore = Restore-CompanionLayout $state ($Mode -eq 'Hide') ($Mode -eq 'Close')
     Write-CompactJson ([ordered]@{
         status = $Mode.ToLowerInvariant()
-        browserWindowRestored = [bool]$rememberedPanel
-        backdropFound = [bool]$rememberedBackdrop
+        browserWindowRestored = [bool]$restore.browserWindowRestored
+        backdropFound = [bool]$restore.backdropFound
     })
     exit 0
 }
@@ -944,6 +1018,8 @@ New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
 } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 
+$exitWatcher = Start-CompanionExitWatcher
+
 Write-CompactJson ([ordered]@{
     status = if ($layout.verified) { 'arranged' } else { 'opened_unarranged' }
     layout = 'equal-split-chatgpt-left-cogentstack-right'
@@ -958,6 +1034,8 @@ Write-CompactJson ([ordered]@{
     browserContentMode = 'page-only'
     browserChromeHidden = $true
     browserContentClipped = [bool]$pageOnly.contentClipped
+    companionExitControl = 'header-x'
+    companionExitWatcherStarted = [bool]$exitWatcher
     browserClipInsets = $pageOnly.clipInsets
     browser = [string]$browser.Name
     registeredDefault = [bool]$browser.IsRegisteredDefault
