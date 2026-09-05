@@ -762,7 +762,7 @@ function Restore-BrowserWindow($Window, $Rectangle, $Style) {
     }
 }
 
-function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState) {
+function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState, [bool]$MaximizeBrowser = $false) {
     $rememberedChat = Find-RememberedWindow $State 'chatDesktop'
     $rememberedPanel = Find-RememberedWindow $State 'panel'
     $rememberedBackdrop = Find-RememberedWindow $State 'backdrop'
@@ -780,6 +780,12 @@ function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState
             Restore-BrowserWindow $rememberedPanel $State.panelOriginal $rememberedStyle
         }
     }
+    $browserWindowMaximized = $false
+    if ($MaximizeBrowser -and $rememberedPanel) {
+        # SW_MAXIMIZE restores an ordinary framed browser window; it is not browser F11 fullscreen.
+        [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$rememberedPanel.Handle, 3) | Out-Null
+        $browserWindowMaximized = $true
+    }
     if ($RemoveState -and (Test-Path -LiteralPath $statePath)) {
         Remove-Item -LiteralPath $statePath -Force
     }
@@ -789,6 +795,7 @@ function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState
     }
     return [ordered]@{
         browserWindowRestored = [bool]$rememberedPanel
+        browserWindowMaximized = $browserWindowMaximized
         backdropFound = [bool]$rememberedBackdrop
     }
 }
@@ -856,7 +863,7 @@ if ($Mode -eq 'WatchExit') {
             $watchPanel = Find-RememberedWindow $watchState 'panel'
             if (-not $watchPanel) { break }
             if (Test-CompanionExitAddress (Get-BrowserAddressValue $watchPanel)) {
-                Restore-CompanionLayout $watchState $false $true | Out-Null
+                Restore-CompanionLayout $watchState $false $true $true | Out-Null
                 break
             }
             Start-Sleep -Milliseconds 250
@@ -887,10 +894,11 @@ if ($Mode -eq 'Inspect') {
 }
 
 if ($Mode -in @('Hide', 'Close')) {
-    $restore = Restore-CompanionLayout $state ($Mode -eq 'Hide') ($Mode -eq 'Close')
+    $restore = Restore-CompanionLayout $state ($Mode -eq 'Hide') ($Mode -eq 'Close') $false
     Write-CompactJson ([ordered]@{
         status = $Mode.ToLowerInvariant()
         browserWindowRestored = [bool]$restore.browserWindowRestored
+        browserWindowMaximized = [bool]$restore.browserWindowMaximized
         backdropFound = [bool]$restore.backdropFound
     })
     exit 0
