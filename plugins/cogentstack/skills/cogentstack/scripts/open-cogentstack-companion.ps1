@@ -653,7 +653,7 @@ function Restore-BrowserWindow($Window, $Rectangle, $Style) {
     }
 }
 
-function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame) {
+function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter) {
     $chat = Get-VisibleWindowRectangle $ChatWindow.Handle
     $panel = $PanelFrame
     $chatRight = [int]$chat.x + [int]$chat.width
@@ -663,18 +663,20 @@ function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame) {
     $panelBottom = [int]$panel.y + [int]$panel.height
     $areaBottom = [int]$Area.y + [int]$Area.height
     $tolerance = 1
+    $gapAligned = [Math]::Abs(($chatRight + $Gutter) - [int]$panel.x) -le $tolerance
     [ordered]@{
         verified = (
             [Math]::Abs([int]$chat.x - [int]$Area.x) -le $tolerance -and
             [Math]::Abs([int]$chat.y - [int]$Area.y) -le $tolerance -and
-            [Math]::Abs($chatRight - [int]$panel.x) -le $tolerance -and
+            $gapAligned -and
             [Math]::Abs([int]$panel.y - [int]$Area.y) -le $tolerance -and
             [Math]::Abs([int]$chat.width - [int]$panel.width) -le $tolerance -and
             [Math]::Abs($panelRight - $areaRight) -le $tolerance -and
             [Math]::Abs($chatBottom - $areaBottom) -le $tolerance -and
             [Math]::Abs($panelBottom - $areaBottom) -le $tolerance
         )
-        joined = [Math]::Abs($chatRight - [int]$panel.x) -le $tolerance
+        joined = $Gutter -eq 0 -and $gapAligned
+        separated = $Gutter -gt 0 -and $gapAligned
         equalWidth = [Math]::Abs([int]$chat.width - [int]$panel.width) -le $tolerance
         topAligned = [Math]::Abs([int]$chat.y - [int]$panel.y) -le $tolerance
         chat = $chat
@@ -698,6 +700,7 @@ if ($Mode -eq 'Inspect') {
         registeredDefault = if ($existingPanel) { [bool]$existingPanel.Browser.IsRegisteredDefault } elseif ($browsers.Count -gt 0) { [bool]$browsers[0].IsRegisteredDefault } else { $false }
         launchMode = 'reuse-existing-browser-tab'
         browserContentMode = if ($state -and $state.PSObject.Properties['browserContentMode']) { [string]$state.browserContentMode } else { 'normal-window' }
+        gutter = if ($state -and $state.PSObject.Properties['gutter']) { [int]$state.gutter } else { 0 }
         whiteBackdrop = [bool](Find-BackdropWindow)
     })
     exit 0
@@ -796,14 +799,17 @@ $panelOriginalStyle = if ($state -and $state.PSObject.Properties['panelHandle'] 
 }
 
 $area = Get-MonitorWorkingArea $chatDesktopWindow.Handle
-$chatDesktopWidth = [Math]::Floor([int]$area.width / 2)
-$panelWidth = [int]$area.width - $chatDesktopWidth
+$gutter = 24
+$availableWidth = [int]$area.width - $gutter
+$chatDesktopWidth = [Math]::Floor($availableWidth / 2)
+$panelWidth = $availableWidth - $chatDesktopWidth
+$panelX = [int]$area.x + $chatDesktopWidth + $gutter
 $backdrop = Start-WhiteBackdrop $area
 
 Move-VisibleDesktopWindow $chatDesktopWindow ([int]$area.x) ([int]$area.y) $chatDesktopWidth ([int]$area.height)
 $pageOnly = $null
 try {
-    $pageOnly = Set-BrowserPageOnly $panelWindow $area ([int]$area.x + $chatDesktopWidth) $panelWidth $panelOriginalStyle
+    $pageOnly = Set-BrowserPageOnly $panelWindow $area $panelX $panelWidth $panelOriginalStyle
 } catch {
     Restore-BrowserWindow $panelWindow $panelOriginal $panelOriginalStyle
     Restore-Window $chatDesktopWindow $chatOriginal
@@ -819,10 +825,10 @@ try {
 [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$chatDesktopWindow.Handle) | Out-Null
 Start-Sleep -Milliseconds 200
 
-$layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame
+$layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame $gutter
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 [ordered]@{
-    schemaVersion = 3
+    schemaVersion = 4
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
@@ -835,6 +841,7 @@ New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     backdropProcessId = [int]$backdrop.ProcessId
     browser = [string]$browser.Name
     browserContentMode = 'page-only'
+    gutter = $gutter
     accountState = [string]$panelSelection.AccountState
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
 } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
@@ -844,10 +851,11 @@ Write-CompactJson ([ordered]@{
     layout = 'equal-split-chatgpt-left-cogentstack-right'
     layoutVerified = [bool]$layout.verified
     joined = [bool]$layout.joined
+    separated = [bool]$layout.separated
     equalWidth = [bool]$layout.equalWidth
     topAligned = [bool]$layout.topAligned
     splitPercent = 50
-    gutter = 0
+    gutter = $gutter
     whiteBackdrop = $true
     browserContentMode = 'page-only'
     browserChromeHidden = $true
