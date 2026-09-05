@@ -11,7 +11,7 @@
       "name": "cogentstack",
       "source": "./claude-plugins/cogentstack",
       "description": "Open the signed-in CogentStack browser companion beside Claude Code Desktop and fulfil explicitly approved Contract Pack projects.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "CogentStack"
       },

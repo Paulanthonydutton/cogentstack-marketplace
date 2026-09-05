@@ -16,7 +16,7 @@ CogentStack for Claude is currently a **desktop-only** integration. Claude Web w
 
 Claude's native discoverable command is `/cogentstack:cogentstack`; `$cogentstack` is retained as CogentStack's common invocation across supported AI desktops.
 
-The plugin downloads its versioned instructions and Windows companion-layout helpers through Claude's marketplace. It does not require the separate CogentStack Desktop installer. On first use, Windows may ask for permission to let the helpers arrange Claude beside an existing normal Chrome or Edge CogentStack tab. The browser's own profile supplies the visible website login state; the plugin does not copy cookies or ask for a CogentStack login or licence during installation.
+The plugin downloads its versioned instructions and Windows companion-layout helpers through Claude's marketplace. It does not require the separate CogentStack Desktop installer. On first use, Windows may ask for permission to let the helpers arrange Claude beside an existing normal Chrome or Edge CogentStack tab. The browser's own profile supplies the visible website login state; the plugin does not copy cookies or collect a CogentStack login or licence during installation. Installing the public package does not activate protected actions: CogentStack must authenticate the website account and record that account's acceptance of the current versioned Terms and EULA before it issues a Desktop credential.
 
 ## Trust boundary
 

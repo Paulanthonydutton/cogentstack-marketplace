@@ -9,7 +9,7 @@ CogentStack's public Claude plugin reuses the normal Google Chrome or Microsoft 
 
 The companion layout hides Claude's sidebar when its accessible toggle can be identified, places Claude and the CogentStack page at equal width over a white backdrop, leaves a 12-pixel vertical divider, and clips ordinary browser controls so the right side reads as a page-only working panel. It never uses browser F11 fullscreen. The CogentStack surface supplies the sticky header, contextual sponsored strip, visible account state, and an X control that returns the browser to the CogentStack home page in a maximized normal window.
 
-The plugin does not distribute contracts, task blueprints, compatibility rules, licence-validation logic, or a local project generator. CogentStack's protected server produces request-bound artifacts, and the local helper verifies and writes only an artifact the user explicitly approved.
+The plugin does not distribute contracts, task blueprints, compatibility rules, licence-validation logic, or a local project generator. CogentStack's protected server produces request-bound artifacts, and the local helper verifies and writes only an artifact the user explicitly approved. The public package does not activate protected access: CogentStack's website must authenticate the account and record that account's acceptance of the current versioned Terms and EULA before the service may issue a Desktop credential. Never collect assent, credentials, or licence details in Claude.
 
 Use `${CLAUDE_PLUGIN_ROOT}` for every bundled script path. Never assume the marketplace checkout or plugin cache location.
 
@@ -46,7 +46,7 @@ Workspace browsing is public. Sign-in and entitlement checks begin only when the
 When the user explicitly asks to sign in, connect, or authorize Claude Desktop:
 
 1. Run `connect-cogentstack.ps1` with its default `start` mode from this skill's scripts directory. It opens the official CogentStack website in the system default browser.
-2. Do not show, describe, or ask the user to enter an authorization code. If the browser is already signed in, ask the user only to select **Continue to Claude Desktop**. Otherwise, ask them to sign in normally and then select that button. This familiar browser confirmation prevents another local application or a deceptive link from silently authorizing itself.
+2. Do not show, describe, or ask the user to enter an authorization code. If the browser is already signed in, ask the user to review and accept the current Terms and EULA if the website requires it, then select **Continue to Claude Desktop**. Otherwise, ask them to sign in normally, complete that website acceptance, and then select that button. Never record assent on the user's behalf. This familiar browser confirmation prevents another local application or a deceptive link from silently authorizing itself.
 3. Run the helper with `-Mode complete` after the returned polling interval. While it reports `approval_pending`, wait for that interval and try again. Stop when it expires.
 4. When it returns `authorized`, keep its one-use workspace fragment private and pass the complete `workspaceUrl` directly to `open-cogentstack-panel.ps1 -Mode Open -Url "<workspaceUrl>"`.
 5. Never print, copy, log, summarize, or persist the one-use fragment outside the helper invocation.

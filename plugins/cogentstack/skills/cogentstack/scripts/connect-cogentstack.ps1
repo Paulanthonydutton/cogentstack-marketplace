@@ -46,12 +46,28 @@ function Write-CompactJson($Value) {
 if ($Mode -eq 'status') {
     if (Test-Path -LiteralPath $credentialPath) {
         $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
-        Write-CompactJson ([ordered]@{
-            status = 'connected'
-            email = $credential.email
-            plan = $credential.plan
-            connectedAt = $credential.connectedAt
-        })
+        $token = Unprotect-CogentStackValue ([string]$credential.token)
+        try {
+            $connection = Invoke-RestMethod `
+                -Method Get `
+                -Uri "$serviceUrl/api/device-authorization/token" `
+                -Headers @{ Accept = 'application/json'; Authorization = "Bearer $token" } `
+                -TimeoutSec 20
+            Write-CompactJson ([ordered]@{
+                status = 'connected'
+                email = $connection.subscriber.email
+                plan = $connection.subscriber.plan
+                connectedAt = $credential.connectedAt
+            })
+        } catch {
+            $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+            if ($statusCode -eq 401) {
+                Remove-Item -LiteralPath $credentialPath -Force
+                Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'replaced_or_revoked' })
+                exit 0
+            }
+            throw
+        }
     } else {
         Write-CompactJson ([ordered]@{ status = 'signed_out' })
     }
@@ -71,6 +87,9 @@ if ($Mode -eq 'disconnect') {
             -Uri "$serviceUrl/api/device-authorization/token" `
             -Headers @{ Accept = 'application/json'; Authorization = "Bearer $token" } `
             -TimeoutSec 20 | Out-Null
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+        if ($statusCode -ne 401) { throw }
     } finally {
         Remove-Item -LiteralPath $credentialPath -Force
     }
@@ -156,6 +175,7 @@ if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $res
     email = [string]$result.subscriber.email
     plan = [string]$result.subscriber.plan
     connectedAt = [string]$result.createdAt
+    deviceLeaseId = [string]$result.deviceLeaseId
 } | ConvertTo-Json | Set-Content -LiteralPath $credentialPath -Encoding UTF8
 Remove-Item -LiteralPath $pendingPath -Force
 
@@ -164,5 +184,6 @@ Write-CompactJson ([ordered]@{
     status = 'authorized'
     email = [string]$result.subscriber.email
     plan = [string]$result.subscriber.plan
+    replacedExistingDevice = [bool]$result.replacedExistingDevice
     workspaceUrl = $workspaceUrl
 })
