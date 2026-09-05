@@ -1,6 +1,6 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260905134945",
+  "version": "0.4.0+codex.20260905140420",
   "description": "Reuse the existing signed-in CogentStack browser tab as a page-only 50/50 workspace beside ChatGPT or Codex, optionally use an isolated in-Codex panel, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",

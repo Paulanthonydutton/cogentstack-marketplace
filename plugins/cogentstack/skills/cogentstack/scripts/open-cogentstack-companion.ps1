@@ -464,7 +464,7 @@ function Get-BrowserAddressValue($Window) {
 
 function Test-CompanionExitAddress([string]$Address) {
     if (-not $Address) { return $false }
-    return $Address -match '^(?:https?://)?(?:www\.)?cogentstack\.app/?\?companion=close(?:#.*)?$'
+    return $Address -match '^(?:https?://)?(?:www\.)?cogentstack\.app/?(?:\?companion=close(?:#.*)?)?$'
 }
 
 function Get-WebDocumentRectangle($Window) {
