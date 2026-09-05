@@ -475,11 +475,12 @@ function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [In
     }
 
     if (-not $documentFinal) { throw 'Windows could not verify the page-only CogentStack frame.' }
-    $horizontalCorrection = $PanelX - [int]$documentFinal.x
-    $verticalCorrection = [int]$Area.y - [int]$documentFinal.y
-    $widthCorrection = $PanelWidth - [int]$documentFinal.width
-    $heightCorrection = [int]$Area.height - [int]$documentFinal.height
-    if ($horizontalCorrection -ne 0 -or $verticalCorrection -ne 0 -or $widthCorrection -ne 0 -or $heightCorrection -ne 0) {
+    for ($correctionAttempt = 0; $correctionAttempt -lt 4; $correctionAttempt++) {
+        $horizontalCorrection = $PanelX - [int]$documentFinal.x
+        $verticalCorrection = [int]$Area.y - [int]$documentFinal.y
+        $widthCorrection = $PanelWidth - [int]$documentFinal.width
+        $heightCorrection = [int]$Area.height - [int]$documentFinal.height
+        if ($horizontalCorrection -eq 0 -and $verticalCorrection -eq 0 -and $widthCorrection -eq 0 -and $heightCorrection -eq 0) { break }
         $windowRectangle = Get-WindowRectangle $Window.Handle
         if (-not [CogentStackWorkspaceWindows]::MoveWindow(
             [IntPtr]$Window.Handle,
@@ -493,12 +494,15 @@ function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [In
         }
         $documentFinal = Wait-WebDocumentRectangle $Window {
             param($rectangle)
-            [Math]::Abs([int]$rectangle.x - $PanelX) -le 1 -and
-            [Math]::Abs([int]$rectangle.y - [int]$Area.y) -le 1 -and
-            [Math]::Abs([int]$rectangle.width - $PanelWidth) -le 1 -and
-            [Math]::Abs([int]$rectangle.height - [int]$Area.height) -le 1
-        }
+            [int]$rectangle.x -eq $PanelX -and
+            [int]$rectangle.y -eq [int]$Area.y -and
+            [int]$rectangle.width -eq $PanelWidth -and
+            [int]$rectangle.height -eq [int]$Area.height
+        } 10
         if (-not $documentFinal) { throw 'Windows could not verify the corrected page-only CogentStack frame.' }
+    }
+    if ([int]$documentFinal.x -ne $PanelX -or [int]$documentFinal.y -ne [int]$Area.y -or [int]$documentFinal.width -ne $PanelWidth -or [int]$documentFinal.height -ne [int]$Area.height) {
+        throw 'Chrome did not converge on the exact CogentStack page-only bounds.'
     }
     [ordered]@{
         originalStyle = $OriginalStyle
