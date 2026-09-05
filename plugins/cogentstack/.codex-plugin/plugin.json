@@ -1,7 +1,7 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260905100729",
-  "description": "Reuse the existing signed-in CogentStack browser tab in a joined 50/50 workspace beside ChatGPT or Codex, optionally use an isolated in-Codex panel, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
+  "version": "0.4.0+codex.20260905103248",
+  "description": "Reuse the existing signed-in CogentStack browser tab as a page-only 50/50 workspace beside ChatGPT or Codex, optionally use an isolated in-Codex panel, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
   "author": {
@@ -15,8 +15,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "CogentStack",
-    "shortDescription": "Reuse a signed-in browser tab, build, deploy, and manage projects.",
-    "longDescription": "CogentStack reuses the exact existing hosted-workspace tab and its normal Chrome or Edge window, hides the desktop sidebar, places a clean white backdrop behind the workspace, and verifies the visible window frames in an aligned 50/50 split. It reports login only when that selected page exposes its account control and never reads or copies cookies or credentials. Only when no matching tab exists does it open the exact hosted URL once as a normal tab in the registered browser. An isolated native Codex panel remains available only when explicitly requested and requires separate Desktop authorization. Natural-language briefs become explicitly approved projects through verified server-generated artifacts, approved Deployment Packs can be prepared, and project-folder deletion runs only after exact hosted confirmation. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
+    "shortDescription": "Reuse a signed-in tab page-only, then build and manage projects.",
+    "longDescription": "CogentStack reuses the exact existing hosted-workspace tab and its normal Chrome or Edge session, hides the desktop sidebar, places a clean white backdrop behind the workspace, and presents the web document itself as a reversible page-only right half in an aligned 50/50 split. Browser controls are positioned outside the work area without using monitor-wide F11; Hide or Close restores the original browser style and position. It reports login only when that selected page exposes its account control and never reads or copies cookies or credentials. Only when no matching tab exists does it open the exact hosted URL once as a normal tab in the registered browser. An isolated native Codex panel remains available only when explicitly requested and requires separate Desktop authorization. Natural-language briefs become explicitly approved projects through verified server-generated artifacts, approved Deployment Packs can be prepared, and project-folder deletion runs only after exact hosted confirmation. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
     "developerName": "Paula",
     "category": "Productivity",
     "capabilities": [

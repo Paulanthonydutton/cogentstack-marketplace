@@ -122,6 +122,18 @@ public static class CogentStackWorkspaceWindows {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+    public static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+    public static extern IntPtr GetWindowLong32(IntPtr hWnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr")]
+    public static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int index, IntPtr value);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+    public static extern IntPtr SetWindowLong32(IntPtr hWnd, int index, IntPtr value);
+
     [DllImport("user32.dll")]
     public static extern int GetWindowTextLength(IntPtr hWnd);
 
@@ -165,6 +177,15 @@ public static class CogentStackWorkspaceWindows {
         var value = new StringBuilder(GetWindowTextLength(hWnd) + 1);
         GetWindowText(hWnd, value, value.Capacity);
         return value.ToString();
+    }
+
+    public static long GetWindowStyle(IntPtr hWnd) {
+        return IntPtr.Size == 8 ? GetWindowLongPtr64(hWnd, -16).ToInt64() : GetWindowLong32(hWnd, -16).ToInt64();
+    }
+
+    public static void SetWindowStyle(IntPtr hWnd, long value) {
+        if (IntPtr.Size == 8) SetWindowLongPtr64(hWnd, -16, new IntPtr(value));
+        else SetWindowLong32(hWnd, -16, new IntPtr(value));
     }
 }
 '@
@@ -346,6 +367,148 @@ function Get-AccountState($Window) {
     return 'unknown'
 }
 
+function Get-WebDocumentRectangle($Window) {
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
+        $documentCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Document
+        )
+        $documents = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $documentCondition)
+        foreach ($document in $documents) {
+            if ([string]$document.Current.Name -notmatch '(?i)^CogentStack \| Create or open a project$') { continue }
+            $rectangle = $document.Current.BoundingRectangle
+            if ($rectangle.Width -le 0 -or $rectangle.Height -le 0) { continue }
+            return [ordered]@{
+                x = [int][Math]::Round($rectangle.X)
+                y = [int][Math]::Round($rectangle.Y)
+                width = [int][Math]::Round($rectangle.Width)
+                height = [int][Math]::Round($rectangle.Height)
+            }
+        }
+    } catch {}
+    return $null
+}
+
+function Wait-WebDocumentRectangle($Window, [scriptblock]$Accept, [int]$Attempts = 30) {
+    for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
+        $rectangle = Get-WebDocumentRectangle $Window
+        if ($rectangle -and (& $Accept $rectangle)) { return $rectangle }
+        Start-Sleep -Milliseconds 100
+    }
+    return Get-WebDocumentRectangle $Window
+}
+
+function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [Int64]$OriginalStyle) {
+    $documentBefore = Get-WebDocumentRectangle $Window
+    $visibleBefore = Get-VisibleWindowRectangle $Window.Handle
+    if (-not $documentBefore -or -not $visibleBefore) {
+        throw 'Windows could not measure the CogentStack web document before hiding the browser controls.'
+    }
+
+    # Chrome can defer renderer resizing when a large background window changes style and size together.
+    # First resize the still-framed window to the target half, then remove the frame after its document catches up.
+    Move-VisibleDesktopWindow $Window $PanelX ([int]$Area.y) $PanelWidth ([int]$Area.height)
+    [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$Window.Handle) | Out-Null
+    [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$Window.Handle) | Out-Null
+    $documentBefore = Wait-WebDocumentRectangle $Window {
+        param($rectangle)
+        [Math]::Abs([int]$rectangle.width - $PanelWidth) -le 64
+    }
+    $visibleBefore = Get-VisibleWindowRectangle $Window.Handle
+    if (-not $documentBefore -or -not $visibleBefore -or [Math]::Abs([int]$documentBefore.width - $PanelWidth) -gt 64) {
+        throw 'Chrome did not refresh the CogentStack document bounds before entering page-only mode.'
+    }
+
+    $normalChromeHeight = [Math]::Max(0, [int]$documentBefore.y - [int]$visibleBefore.y)
+    $borderlessStyle = ($OriginalStyle -band (-bnot [Int64]0x00CF0000)) -bor [Int64]0x80000000
+    [CogentStackWorkspaceWindows]::SetWindowStyle([IntPtr]$Window.Handle, $borderlessStyle)
+    [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Window.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0037) | Out-Null
+    [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Window.Handle, 9) | Out-Null
+    [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$Window.Handle) | Out-Null
+    [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$Window.Handle) | Out-Null
+
+    if (-not [CogentStackWorkspaceWindows]::MoveWindow(
+        [IntPtr]$Window.Handle,
+        $PanelX,
+        ([int]$Area.y - $normalChromeHeight),
+        $PanelWidth,
+        ([int]$Area.height + $normalChromeHeight + 24),
+        $true
+    )) {
+        throw 'Windows could not size the CogentStack browser for page-only mode.'
+    }
+    $documentProbe = Wait-WebDocumentRectangle $Window {
+        param($rectangle)
+        [Math]::Abs([int]$rectangle.width - $PanelWidth) -le 64
+    }
+
+    $visibleProbe = Get-VisibleWindowRectangle $Window.Handle
+    if (-not $visibleProbe -or -not $documentProbe) {
+        throw 'Windows could not measure the CogentStack web document after hiding the browser controls.'
+    }
+    if ([Math]::Abs([int]$documentProbe.width - $PanelWidth) -gt 64) {
+        throw 'Chrome did not refresh the CogentStack document bounds after entering page-only mode.'
+    }
+
+    $leftInset = [Math]::Max(0, [int]$documentProbe.x - [int]$visibleProbe.x)
+    $topInset = [Math]::Max(0, [int]$documentProbe.y - [int]$visibleProbe.y)
+    $rightInset = [Math]::Max(0, ([int]$visibleProbe.x + [int]$visibleProbe.width) - ([int]$documentProbe.x + [int]$documentProbe.width))
+    $bottomInset = [Math]::Max(0, ([int]$visibleProbe.y + [int]$visibleProbe.height) - ([int]$documentProbe.y + [int]$documentProbe.height))
+
+    if (-not [CogentStackWorkspaceWindows]::MoveWindow(
+        [IntPtr]$Window.Handle,
+        ($PanelX - $leftInset),
+        ([int]$Area.y - $topInset),
+        ($PanelWidth + $leftInset + $rightInset),
+        ([int]$Area.height + $topInset + $bottomInset),
+        $true
+    )) {
+        throw 'Windows could not align the CogentStack page-only frame.'
+    }
+    $documentFinal = Wait-WebDocumentRectangle $Window {
+        param($rectangle)
+        [Math]::Abs([int]$rectangle.x - $PanelX) -le 8 -and
+        [Math]::Abs([int]$rectangle.y - [int]$Area.y) -le 8 -and
+        [Math]::Abs([int]$rectangle.width - $PanelWidth) -le 8 -and
+        [Math]::Abs([int]$rectangle.height - [int]$Area.height) -le 8
+    }
+
+    if (-not $documentFinal) { throw 'Windows could not verify the page-only CogentStack frame.' }
+    $horizontalCorrection = $PanelX - [int]$documentFinal.x
+    $verticalCorrection = [int]$Area.y - [int]$documentFinal.y
+    $widthCorrection = $PanelWidth - [int]$documentFinal.width
+    $heightCorrection = [int]$Area.height - [int]$documentFinal.height
+    if ($horizontalCorrection -ne 0 -or $verticalCorrection -ne 0 -or $widthCorrection -ne 0 -or $heightCorrection -ne 0) {
+        $windowRectangle = Get-WindowRectangle $Window.Handle
+        if (-not [CogentStackWorkspaceWindows]::MoveWindow(
+            [IntPtr]$Window.Handle,
+            ([int]$windowRectangle.x + $horizontalCorrection),
+            ([int]$windowRectangle.y + $verticalCorrection),
+            ([int]$windowRectangle.width + $widthCorrection),
+            ([int]$windowRectangle.height + $heightCorrection),
+            $true
+        )) {
+            throw 'Windows could not apply the final CogentStack page-only correction.'
+        }
+        $documentFinal = Wait-WebDocumentRectangle $Window {
+            param($rectangle)
+            [Math]::Abs([int]$rectangle.x - $PanelX) -le 1 -and
+            [Math]::Abs([int]$rectangle.y - [int]$Area.y) -le 1 -and
+            [Math]::Abs([int]$rectangle.width - $PanelWidth) -le 1 -and
+            [Math]::Abs([int]$rectangle.height - [int]$Area.height) -le 1
+        }
+        if (-not $documentFinal) { throw 'Windows could not verify the corrected page-only CogentStack frame.' }
+    }
+    [ordered]@{
+        originalStyle = $OriginalStyle
+        appliedStyle = $borderlessStyle
+        chromeInsets = [ordered]@{ left = $leftInset; top = $topInset; right = $rightInset; bottom = $bottomInset }
+        contentFrame = $documentFinal
+        windowFrame = Get-VisibleWindowRectangle $Window.Handle
+    }
+}
+
 function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
     $results = @()
     try {
@@ -420,6 +583,7 @@ function Start-WhiteBackdrop($Area) {
     $existing = @(Find-BackdropWindow | Select-Object -First 1)
     if ($existing) {
         Move-DesktopWindow $existing ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
+        [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$existing.Handle, [IntPtr]1, 0, 0, 0, 0, 0x0013) | Out-Null
         return $existing
     }
 
@@ -457,6 +621,7 @@ Add-Type -AssemblyName System.Drawing
         $backdrop = @(Get-DesktopWindows | Where-Object { $_.ProcessId -eq $backdropProcess.Id -and $_.Title -eq $backdropTitle } | Select-Object -First 1)
     }
     if (-not $backdrop) { throw 'Windows could not create the white CogentStack workspace background.' }
+    [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$backdrop.Handle, [IntPtr]1, 0, 0, 0, 0, 0x0013) | Out-Null
     return $backdrop
 }
 
@@ -466,9 +631,27 @@ function Restore-Window($Window, $Rectangle) {
     }
 }
 
-function Test-WorkspaceLayout($Area, $ChatWindow, $PanelWindow) {
+function Restore-BrowserWindow($Window, $Rectangle, $Style) {
+    if (-not $Window -or -not $Rectangle) { return }
+    if ($null -ne $Style) {
+        [CogentStackWorkspaceWindows]::SetWindowStyle([IntPtr]$Window.Handle, [Int64]$Style)
+        [CogentStackWorkspaceWindows]::SetWindowPos(
+            [IntPtr]$Window.Handle,
+            [IntPtr]::Zero,
+            [int]$Rectangle.x,
+            [int]$Rectangle.y,
+            [int]$Rectangle.width,
+            [int]$Rectangle.height,
+            0x0020
+        ) | Out-Null
+    } else {
+        Restore-Window $Window $Rectangle
+    }
+}
+
+function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame) {
     $chat = Get-VisibleWindowRectangle $ChatWindow.Handle
-    $panel = Get-VisibleWindowRectangle $PanelWindow.Handle
+    $panel = $PanelFrame
     $chatRight = [int]$chat.x + [int]$chat.width
     $panelRight = [int]$panel.x + [int]$panel.width
     $areaRight = [int]$Area.x + [int]$Area.width
@@ -510,6 +693,7 @@ if ($Mode -eq 'Inspect') {
         browser = if ($existingPanel) { [string]$existingPanel.Browser.Name } elseif ($browsers.Count -gt 0) { [string]$browsers[0].Name } else { $null }
         registeredDefault = if ($existingPanel) { [bool]$existingPanel.Browser.IsRegisteredDefault } elseif ($browsers.Count -gt 0) { [bool]$browsers[0].IsRegisteredDefault } else { $false }
         launchMode = 'reuse-existing-browser-tab'
+        browserContentMode = if ($state -and $state.PSObject.Properties['browserContentMode']) { [string]$state.browserContentMode } else { 'normal-window' }
         whiteBackdrop = [bool](Find-BackdropWindow)
     })
     exit 0
@@ -528,7 +712,10 @@ if ($Mode -in @('Hide', 'Close')) {
     }
     if ($state) {
         Restore-Window $rememberedChat $state.chatDesktopOriginal
-        if ($state.PSObject.Properties['panelOriginal']) { Restore-Window $rememberedPanel $state.panelOriginal }
+        if ($state.PSObject.Properties['panelOriginal']) {
+            $rememberedStyle = if ($state.PSObject.Properties['panelOriginalStyle']) { [Int64]$state.panelOriginalStyle } else { $null }
+            Restore-BrowserWindow $rememberedPanel $state.panelOriginal $rememberedStyle
+        }
     }
     if ($Mode -eq 'Close' -and (Test-Path -LiteralPath $statePath)) {
         Remove-Item -LiteralPath $statePath -Force
@@ -598,6 +785,11 @@ $panelOriginal = if ($state -and $state.PSObject.Properties['panelHandle'] -and 
 } else {
     Get-WindowRectangle $panelWindow.Handle
 }
+$panelOriginalStyle = if ($state -and $state.PSObject.Properties['panelHandle'] -and [Int64]$state.panelHandle -eq [Int64]$panelWindow.Handle -and $state.PSObject.Properties['panelOriginalStyle']) {
+    [Int64]$state.panelOriginalStyle
+} else {
+    [CogentStackWorkspaceWindows]::GetWindowStyle([IntPtr]$panelWindow.Handle)
+}
 
 $area = Get-MonitorWorkingArea $chatDesktopWindow.Handle
 $chatDesktopWidth = [Math]::Floor([int]$area.width / 2)
@@ -605,7 +797,17 @@ $panelWidth = [int]$area.width - $chatDesktopWidth
 $backdrop = Start-WhiteBackdrop $area
 
 Move-VisibleDesktopWindow $chatDesktopWindow ([int]$area.x) ([int]$area.y) $chatDesktopWidth ([int]$area.height)
-Move-VisibleDesktopWindow $panelWindow ([int]$area.x + $chatDesktopWidth) ([int]$area.y) $panelWidth ([int]$area.height)
+$pageOnly = $null
+try {
+    $pageOnly = Set-BrowserPageOnly $panelWindow $area ([int]$area.x + $chatDesktopWidth) $panelWidth $panelOriginalStyle
+} catch {
+    Restore-BrowserWindow $panelWindow $panelOriginal $panelOriginalStyle
+    Restore-Window $chatDesktopWindow $chatOriginal
+    if ($backdrop -and [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$backdrop.Handle)) {
+        [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$backdrop.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    }
+    throw
+}
 [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$chatDesktopWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
 [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$panelWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
 [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$panelWindow.Handle) | Out-Null
@@ -613,10 +815,10 @@ Move-VisibleDesktopWindow $panelWindow ([int]$area.x + $chatDesktopWidth) ([int]
 [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$chatDesktopWindow.Handle) | Out-Null
 Start-Sleep -Milliseconds 200
 
-$layout = Test-WorkspaceLayout $area $chatDesktopWindow $panelWindow
+$layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 [ordered]@{
-    schemaVersion = 2
+    schemaVersion = 3
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
@@ -624,9 +826,11 @@ New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     panelProcessId = [int]$panelWindow.ProcessId
     panelProcessName = [string]$panelWindow.ProcessName
     panelOriginal = $panelOriginal
+    panelOriginalStyle = $panelOriginalStyle
     backdropHandle = [Int64]$backdrop.Handle
     backdropProcessId = [int]$backdrop.ProcessId
     browser = [string]$browser.Name
+    browserContentMode = 'page-only'
     accountState = [string]$panelSelection.AccountState
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
 } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
@@ -641,6 +845,8 @@ Write-CompactJson ([ordered]@{
     splitPercent = 50
     gutter = 0
     whiteBackdrop = $true
+    browserContentMode = 'page-only'
+    browserChromeHidden = $true
     browser = [string]$browser.Name
     registeredDefault = [bool]$browser.IsRegisteredDefault
     reusedExistingTab = [bool]$panelSelection.ReusedExistingTab
@@ -648,4 +854,5 @@ Write-CompactJson ([ordered]@{
     accountState = [string]$panelSelection.AccountState
     chatFrame = $layout.chat
     panelFrame = $layout.panel
+    browserWindowFrame = $pageOnly.windowFrame
 })
