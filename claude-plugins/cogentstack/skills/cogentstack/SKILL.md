@@ -1,11 +1,13 @@
 ---
 name: cogentstack
-description: Open CogentStack beside Claude Code Desktop, securely authorize this desktop, turn a natural-language brief into an explicitly approved project, prepare an approved deployment handoff, or execute a project deletion explicitly approved in CogentStack. Use when the user invokes CogentStack, $cogentstack, or asks to open, hide, close, connect, or use the CogentStack companion panel. This integration is for Claude Code Desktop; do not substitute a Claude Web flow.
+description: Open the hosted CogentStack workspace as a signed-in browser companion beside Claude Code Desktop on Windows, securely authorize this desktop when explicitly requested, turn a natural-language brief into an explicitly approved project, prepare an approved deployment handoff, or execute a project deletion explicitly approved in CogentStack. Use when the user invokes CogentStack, $cogentstack, or asks to open, hide, close, connect, or use the CogentStack companion panel. This integration is for Claude Code Desktop; do not substitute a Claude Web flow.
 ---
 
 # Use CogentStack with Claude Code Desktop
 
-CogentStack's public Claude plugin opens the protected hosted workspace in an Edge app window beside the active Claude Code Desktop window. The bundled Windows helper coordinates two independent application windows; it does not embed, scrape, re-parent, or automate Claude's private interface. No separate CogentStack Desktop installer is required for this companion layout.
+CogentStack's public Claude plugin reuses the normal Google Chrome or Microsoft Edge window that already contains the hosted CogentStack workspace, then arranges that browser beside the active Claude Code Desktop window. Reusing the normal browser profile lets an existing CogentStack website login remain visible without copying cookies or pretending that Claude inherits the browser session. The bundled Windows helpers coordinate two independent application windows; they do not embed, scrape, re-parent, or automate Claude's private conversation interface. No separate CogentStack Desktop installer is required.
+
+The companion layout hides Claude's sidebar when its accessible toggle can be identified, places Claude and the CogentStack page at equal width over a white backdrop, leaves a 12-pixel vertical divider, and clips ordinary browser controls so the right side reads as a page-only working panel. It never uses browser F11 fullscreen. The CogentStack surface supplies the sticky header, contextual sponsored strip, visible account state, and an X control that returns the browser to the CogentStack home page in a maximized normal window.
 
 The plugin does not distribute contracts, task blueprints, compatibility rules, licence-validation logic, or a local project generator. CogentStack's protected server produces request-bound artifacts, and the local helper verifies and writes only an artifact the user explicitly approved.
 
@@ -19,15 +21,23 @@ Treat `$cogentstack`, a direct invocation of this skill, or a natural-language r
 
    `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\skills\cogentstack\scripts\ensure-cogentstack.ps1"`
 
-2. Parse its compact JSON. Continue only when `status` is `ready`, `surface` is `claude-desktop`, and the returned URL is an HTTPS `/stack` URL on `cogentstack.app`.
-3. Run the companion helper exactly once, passing the exact returned URL:
+2. Parse its compact JSON. Continue only when `status` is `ready`, `surface` is `claude-desktop`, and the returned URL is exactly `https://cogentstack.app/stack?surface=claude-desktop`.
+3. Run the sidebar helper exactly once:
+
+   `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\skills\cogentstack\scripts\hide-claude-sidebar.ps1"`
+
+   Treat `hidden` and `already_hidden` as confirmation. If it reports `unavailable`, `ambiguous`, or `failed`, continue with the companion open but do not claim that the Claude sidebar was hidden.
+4. Run the companion helper exactly once, passing the exact returned URL:
 
    `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}\skills\cogentstack\scripts\open-cogentstack-panel.ps1" -Mode Open -Url "<exact returned URL>"`
 
-4. Treat `arranged` and `opened_unarranged` as successful opens. If the helper reports `opened_unarranged`, explain that CogentStack opened but Windows could not safely identify both windows; the user can place it beside Claude manually.
-5. Do not retry an accepted open, open another browser window, use computer control to move the windows, or start the separate CogentStack Desktop application.
+5. Treat `arranged` with `layoutVerified: true` as the fully positioned result. `opened_unarranged` means CogentStack opened but Windows could not safely identify both application windows; report that limitation and do not claim 50/50 alignment.
+6. Use only the helper's `accountState` field as login evidence. `signed_in` proves that the reused browser tab visibly reports the account; `signed_out` proves a visible signed-out state; `unknown` must be reported as unverified. Never infer login from browser launch success.
+7. Do not retry an accepted open, create a duplicate tab or browser app window, pass `--app` or `--new-window`, use browser F11, use computer control to move the windows, or start the separate CogentStack Desktop application.
 
-When the user asks to hide the panel, run the same helper with `-Mode Hide`. When the user asks to close the panel, run it with `-Mode Close`. Both restore Claude to its recorded pre-companion bounds when that window is still available.
+When the user asks to hide the panel, run the same helper with `-Mode Hide`. When the user asks to close the panel, run it with `-Mode Close`. Both restore Claude and the reused normal browser window to their recorded pre-companion state when those windows are still available; neither closes the user's browser.
+
+When the user clicks the CogentStack header X, the watcher returns the reused tab to `https://cogentstack.app/`, clears the page-only crop, restores the ordinary browser frame, maximizes that browser window using the Windows maximize state rather than F11, restores Claude, removes the white backdrop, and deletes the saved companion state.
 
 Workspace browsing is public. Sign-in and entitlement checks begin only when the user asks to connect Claude Desktop or chooses a protected contract action.
 
@@ -77,4 +87,4 @@ Only after the user generates a Deployment Pack from CogentStack's Hosting view:
 
 ## Desktop-only boundary
 
-Do not implement, imply, or silently fall back to a Claude Web connector. Do not iframe Claude, re-parent the Claude application window, scrape its conversation, copy browser cookies, or use computer control merely to create the companion layout. Claude Web support is a separate future release.
+Do not implement, imply, or silently fall back to a Claude Web connector. Do not iframe Claude, re-parent the Claude application window, scrape its conversation, copy browser cookies, or use computer control merely to create the companion layout. Reusing and arranging a normal Chrome or Edge window through the bundled Windows helper is the supported boundary. Claude Web support is a separate future release.

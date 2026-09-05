@@ -1,7 +1,7 @@
 {
   "name": "cogentstack",
-  "version": "0.1.1",
-  "description": "Open CogentStack beside Claude Code Desktop and fulfil explicitly approved Contract Pack projects.",
+  "version": "0.2.0",
+  "description": "Open the signed-in CogentStack browser companion beside Claude Code Desktop and fulfil explicitly approved Contract Pack projects.",
   "author": {
     "name": "CogentStack"
   },

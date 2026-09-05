@@ -33,7 +33,11 @@ for (const marker of [
   "$cogentstack",
   "${CLAUDE_PLUGIN_ROOT}",
   "surface` is `claude-desktop`",
+  "hide-claude-sidebar.ps1",
   "open-cogentstack-panel.ps1",
+  "normal Google Chrome or Microsoft Edge window",
+  "12-pixel vertical divider",
+  "maximized normal window",
   "fulfil-project.ps1",
   "delete-project.ps1",
   "prepare-deployment.ps1",
@@ -50,6 +54,7 @@ const requiredScripts = [
   "delete-project.ps1",
   "ensure-cogentstack.ps1",
   "fulfil-project.ps1",
+  "hide-claude-sidebar.ps1",
   "native-command.ps1",
   "open-cogentstack-panel.ps1",
   "prepare-deployment.ps1",
@@ -64,11 +69,28 @@ if (!ensureSource.includes("https://cogentstack.app/stack?surface=claude-desktop
 if (ensureSource.includes("surface=chatgpt")) fail("readiness helper falls back to the ChatGPT surface");
 
 const panelSource = await readFile(join(scriptsRoot, "open-cogentstack-panel.ps1"), "utf8");
-for (const marker of ["Confirm-CogentStackUrl", "--app=$safeUrl", "Move-DesktopWindow", "claude-companion-layout.json", "opened_unarranged"]) {
+for (const marker of [
+  "Confirm-CogentStackUrl",
+  "Get-CompanionBrowsers",
+  "Find-ExistingCogentStackWindow",
+  "Set-BrowserPageOnly",
+  "Start-WhiteBackdrop",
+  "Start-CompanionExitWatcher",
+  "Restore-CompanionLayout $watchState $false $true $true",
+  "claude-companion-layout.json",
+  "opened_unarranged",
+  "accountState",
+  "layoutVerified",
+]) {
   if (!panelSource.includes(marker)) fail(`companion helper is missing required marker: ${marker}`);
 }
-for (const forbidden of ["SetParent(", "FindWindow(", "SendKeys", "cogentstack://desktop"]) {
+for (const forbidden of ["--app=", "--new-window", "{F11}", "SetParent(", "FindWindow(", "SendKeys", "cogentstack://desktop"]) {
   if (panelSource.includes(forbidden)) fail(`companion helper crosses the supported window boundary: ${forbidden}`);
+}
+
+const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
+for (const marker of ["Get-Process -Name Claude", "Hide sidebar", "Show sidebar", "already_hidden"]) {
+  if (!sidebarSource.includes(marker)) fail(`Claude sidebar helper is missing required marker: ${marker}`);
 }
 
 const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "scripts");
@@ -113,7 +135,12 @@ const inspect = spawnSync("powershell.exe", [
 if (inspect.status !== 0) fail(`safe companion inspection failed: ${inspect.stderr.trim()}`);
 let inspection;
 try { inspection = JSON.parse(inspect.stdout.trim()); } catch { fail("companion inspection did not return compact JSON"); }
-if (inspection.status !== "inspected" || inspection.platform !== "windows") fail("companion inspection returned an unexpected result");
+if (
+  inspection.status !== "inspected" ||
+  inspection.platform !== "windows" ||
+  typeof inspection.claudeDesktopWindowFound !== "boolean" ||
+  typeof inspection.browserAvailable !== "boolean"
+) fail("companion inspection returned an unexpected result");
 
 console.log(JSON.stringify({
   status: "valid",
