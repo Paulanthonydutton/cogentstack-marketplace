@@ -1,7 +1,7 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260905091933",
-  "description": "Open CogentStack in a joined 50/50 Edge companion beside ChatGPT or Codex, optionally use an isolated in-Codex panel, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
+  "version": "0.4.0+codex.20260905093544",
+  "description": "Open CogentStack in a joined 50/50 signed-in browser companion beside ChatGPT or Codex, optionally use an isolated in-Codex panel, build approved projects, prepare approved deployment packs, and execute explicitly confirmed project-folder deletions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
   "author": {
@@ -15,8 +15,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "CogentStack",
-    "shortDescription": "Open a joined Edge companion, build, deploy, and manage projects.",
-    "longDescription": "CogentStack opens the hosted workspace as a Microsoft Edge companion beside ChatGPT or Codex on Windows, hides the desktop sidebar, and joins the visible window frames in an aligned 50/50 split. An existing login in the normal Edge profile is retained. An isolated native Codex panel remains available only when explicitly requested and requires separate Desktop authorization. Natural-language briefs become explicitly approved projects through verified server-generated artifacts, approved Deployment Packs can be prepared, and project-folder deletion runs only after exact hosted confirmation. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
+    "shortDescription": "Open a joined browser companion, build, deploy, and manage projects.",
+    "longDescription": "CogentStack opens the hosted workspace with the registered Windows browser, using Chrome or Edge and its last-used normal profile, hides the desktop sidebar, and joins the visible window frames in an aligned 50/50 split. An existing CogentStack website login in that profile is retained without copying cookies or credentials. An isolated native Codex panel remains available only when explicitly requested and requires separate Desktop authorization. Natural-language briefs become explicitly approved projects through verified server-generated artifacts, approved Deployment Packs can be prepared, and project-folder deletion runs only after exact hosted confirmation. Project Type Contracts, blueprints, compatibility rules, licence validation, and subscriber data remain on the protected CogentStack service.",
     "developerName": "Paula",
     "category": "Productivity",
     "capabilities": [

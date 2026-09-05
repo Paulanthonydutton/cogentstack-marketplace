@@ -41,16 +41,72 @@ function Get-ChatDesktopWindow {
     } | Sort-Object ProcessId | Select-Object -First 1)
 }
 
-function Get-EdgePath {
-    $command = Get-Command 'msedge.exe' -ErrorAction SilentlyContinue
+function Find-BrowserExecutable([string]$CommandName, [string[]]$Candidates) {
+    $command = Get-Command $CommandName -ErrorAction SilentlyContinue
     if ($command) { return [string]$command.Source }
+    $available = @($Candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($available.Count -gt 0) { return [string]$available[0] }
+    return $null
+}
 
-    $candidates = @(@(
+function Get-DefaultHttpsProgId {
+    $choicePath = 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice'
+    try { return [string](Get-ItemProperty -LiteralPath $choicePath -ErrorAction Stop).ProgId } catch { return '' }
+}
+
+function Get-LastUsedProfileDirectory([string]$LocalStatePath, [string]$UserDataRoot) {
+    if (-not (Test-Path -LiteralPath $LocalStatePath -PathType Leaf)) { return $null }
+    try {
+        $lastUsed = [string](Get-Content -Raw -LiteralPath $LocalStatePath | ConvertFrom-Json).profile.last_used
+        if ($lastUsed -notmatch '^[A-Za-z0-9 ._-]+$') { return $null }
+        if (-not (Test-Path -LiteralPath (Join-Path $UserDataRoot $lastUsed) -PathType Container)) { return $null }
+        return $lastUsed
+    } catch {
+        return $null
+    }
+}
+
+function Get-CompanionBrowser {
+    $chromeUserData = Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data'
+    $edgeUserData = Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data'
+    $chromePath = Find-BrowserExecutable 'chrome.exe' @(
+        (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
+    )
+    $edgePath = Find-BrowserExecutable 'msedge.exe' @(
         (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
         (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
         (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
-    if ($candidates.Count -gt 0) { return [string]$candidates[0] }
+    )
+    $defaultProgId = Get-DefaultHttpsProgId
+    $candidates = if ($defaultProgId -match '(?i)^ChromeHTML') {
+        @('chrome', 'msedge')
+    } elseif ($defaultProgId -match '(?i)^MSEdgeHTM') {
+        @('msedge', 'chrome')
+    } else {
+        @('chrome', 'msedge')
+    }
+    foreach ($candidate in $candidates) {
+        if ($candidate -eq 'chrome' -and $chromePath) {
+            return [pscustomobject]@{
+                Name = 'Google Chrome'
+                ProcessName = 'chrome'
+                ExecutablePath = $chromePath
+                ProfileDirectory = Get-LastUsedProfileDirectory (Join-Path $chromeUserData 'Local State') $chromeUserData
+                IsRegisteredDefault = $defaultProgId -match '(?i)^ChromeHTML'
+            }
+        }
+        if ($candidate -eq 'msedge' -and $edgePath) {
+            return [pscustomobject]@{
+                Name = 'Microsoft Edge'
+                ProcessName = 'msedge'
+                ExecutablePath = $edgePath
+                ProfileDirectory = Get-LastUsedProfileDirectory (Join-Path $edgeUserData 'Local State') $edgeUserData
+                IsRegisteredDefault = $defaultProgId -match '(?i)^MSEdgeHTM'
+            }
+        }
+    }
     return $null
 }
 
@@ -118,13 +174,14 @@ function Find-RememberedWindow($State, [string]$Kind) {
     }
     [uint32]$actualProcess = 0
     [CogentStackChatDesktopWindow]::GetWindowThreadProcessId([IntPtr]$expectedHandle, [ref]$actualProcess) | Out-Null
-    if ([int]$actualProcess -ne $expectedProcess -or -not (Get-Process -Id $expectedProcess -ErrorAction SilentlyContinue)) {
+    $process = Get-Process -Id $expectedProcess -ErrorAction SilentlyContinue
+    if ([int]$actualProcess -ne $expectedProcess -or -not $process) {
         return $null
     }
     [pscustomobject]@{
         Handle = $expectedHandle
         ProcessId = $expectedProcess
-        ProcessName = if ($Kind -eq 'panel') { 'msedge' } else { 'ChatGPT/Codex' }
+        ProcessName = if ($Kind -eq 'panel') { [string]$process.ProcessName } else { 'ChatGPT/Codex' }
         Title = ''
     }
 }
@@ -191,7 +248,7 @@ function Restore-ChatDesktopWindow($State) {
 
 $state = Read-LayoutState
 $rememberedPanel = Find-RememberedWindow $state 'panel'
-$edgePath = Get-EdgePath
+$browser = Get-CompanionBrowser
 $chatDesktopWindow = @(Get-ChatDesktopWindow | Select-Object -First 1)
 
 if ($Mode -eq 'Inspect') {
@@ -200,7 +257,9 @@ if ($Mode -eq 'Inspect') {
         platform = 'windows'
         chatDesktopWindowFound = [bool]$chatDesktopWindow
         companionWindowFound = [bool]$rememberedPanel
-        edgeAvailable = [bool]$edgePath
+        browserAvailable = [bool]$browser
+        browser = if ($browser) { [string]$browser.Name } else { $null }
+        registeredDefault = if ($browser) { [bool]$browser.IsRegisteredDefault } else { $false }
     })
     exit 0
 }
@@ -223,26 +282,33 @@ if ($Mode -in @('Hide', 'Close')) {
 
 $safeUrl = Confirm-CogentStackUrl $Url
 $panelWindow = $rememberedPanel
+if ($panelWindow -and $browser -and $panelWindow.ProcessName -ne $browser.ProcessName) {
+    [CogentStackChatDesktopWindow]::PostMessage([IntPtr]$panelWindow.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    $panelWindow = $null
+    Start-Sleep -Milliseconds 300
+}
 if (-not $panelWindow) {
-    if (-not $edgePath) {
+    if (-not $browser) {
         Write-CompactJson ([ordered]@{
             status = 'browser_unavailable'
-            message = 'Microsoft Edge is required for the installer-free CogentStack companion panel.'
+            message = 'Google Chrome or Microsoft Edge is required for the installer-free CogentStack companion panel.'
         })
         exit 2
     }
 
     $beforeHandles = @{}
-    Get-DesktopWindows | Where-Object { $_.ProcessName -eq 'msedge' } | ForEach-Object { $beforeHandles[[string]$_.Handle] = $true }
-    Start-Process -FilePath $edgePath -ArgumentList @("--app=$safeUrl", '--new-window') | Out-Null
+    Get-DesktopWindows | Where-Object { $_.ProcessName -eq $browser.ProcessName } | ForEach-Object { $beforeHandles[[string]$_.Handle] = $true }
+    $browserArguments = @("--app=$safeUrl", '--new-window')
+    if ($browser.ProfileDirectory) { $browserArguments += "--profile-directory=$($browser.ProfileDirectory)" }
+    Start-Process -FilePath $browser.ExecutablePath -ArgumentList $browserArguments | Out-Null
 
     for ($attempt = 0; $attempt -lt 50 -and -not $panelWindow; $attempt++) {
         Start-Sleep -Milliseconds 200
-        $newEdgeWindows = @(Get-DesktopWindows | Where-Object {
-            $_.ProcessName -eq 'msedge' -and -not $beforeHandles.ContainsKey([string]$_.Handle)
+        $newBrowserWindows = @(Get-DesktopWindows | Where-Object {
+            $_.ProcessName -eq $browser.ProcessName -and -not $beforeHandles.ContainsKey([string]$_.Handle)
         })
-        $panelWindow = @($newEdgeWindows | Where-Object { $_.Title -match '(?i)cogentstack' } | Select-Object -First 1)
-        if (-not $panelWindow -and $newEdgeWindows.Count -eq 1) { $panelWindow = $newEdgeWindows[0] }
+        $panelWindow = @($newBrowserWindows | Where-Object { $_.Title -match '(?i)cogentstack' } | Select-Object -First 1)
+        if (-not $panelWindow -and $newBrowserWindows.Count -eq 1) { $panelWindow = $newBrowserWindows[0] }
     }
 }
 
@@ -284,6 +350,8 @@ New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     chatDesktopOriginal = $originalRectangle
     panelHandle = [Int64]$panelWindow.Handle
     panelProcessId = [int]$panelWindow.ProcessId
+    panelProcessName = [string]$panelWindow.ProcessName
+    browser = [string]$browser.Name
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
 } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 
@@ -294,5 +362,7 @@ Write-CompactJson ([ordered]@{
     gutter = $gutter
     panelWidth = $panelWidth
     panelTopOffset = $panelTopOffset
+    browser = [string]$browser.Name
+    registeredDefault = [bool]$browser.IsRegisteredDefault
     screen = [string]$screen.DeviceName
 })
