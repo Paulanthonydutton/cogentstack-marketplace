@@ -89,6 +89,12 @@ public static class CogentStackChatDesktopWindow {
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr hWnd);
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out RECT value, int size);
 }
 '@
 }
@@ -139,6 +145,40 @@ function Move-DesktopWindow($Window, [int]$X, [int]$Y, [int]$Width, [int]$Height
     if (-not [CogentStackChatDesktopWindow]::MoveWindow([IntPtr]$Window.Handle, $X, $Y, $Width, $Height, $true)) {
         throw "Windows could not position the $($Window.ProcessName) window."
     }
+}
+
+function Get-VisibleFrameInsets($Window) {
+    $windowRectangle = New-Object CogentStackChatDesktopWindow+RECT
+    $visibleRectangle = New-Object CogentStackChatDesktopWindow+RECT
+    if (-not [CogentStackChatDesktopWindow]::GetWindowRect([IntPtr]$Window.Handle, [ref]$windowRectangle)) {
+        return [ordered]@{ left = 0; top = 0; right = 0; bottom = 0 }
+    }
+    $result = [CogentStackChatDesktopWindow]::DwmGetWindowAttribute(
+        [IntPtr]$Window.Handle,
+        9,
+        [ref]$visibleRectangle,
+        [Runtime.InteropServices.Marshal]::SizeOf($visibleRectangle)
+    )
+    if ($result -ne 0) {
+        return [ordered]@{ left = 0; top = 0; right = 0; bottom = 0 }
+    }
+    [ordered]@{
+        left = [Math]::Max(0, $visibleRectangle.Left - $windowRectangle.Left)
+        top = [Math]::Max(0, $visibleRectangle.Top - $windowRectangle.Top)
+        right = [Math]::Max(0, $windowRectangle.Right - $visibleRectangle.Right)
+        bottom = [Math]::Max(0, $windowRectangle.Bottom - $visibleRectangle.Bottom)
+    }
+}
+
+function Move-VisibleDesktopWindow($Window, [int]$X, [int]$Y, [int]$Width, [int]$Height) {
+    [CogentStackChatDesktopWindow]::ShowWindow([IntPtr]$Window.Handle, 9) | Out-Null
+    $insets = Get-VisibleFrameInsets $Window
+    Move-DesktopWindow `
+        $Window `
+        ($X - [int]$insets.left) `
+        ($Y - [int]$insets.top) `
+        ($Width + [int]$insets.left + [int]$insets.right) `
+        ($Height + [int]$insets.top + [int]$insets.bottom)
 }
 
 function Restore-ChatDesktopWindow($State) {
@@ -226,12 +266,15 @@ if (-not $chatDesktopWindow) {
 $originalRectangle = if ($state -and $state.chatDesktopOriginal) { $state.chatDesktopOriginal } else { Get-WindowRectangle $chatDesktopWindow.Handle }
 $screen = [System.Windows.Forms.Screen]::FromHandle([IntPtr]$chatDesktopWindow.Handle)
 $area = $screen.WorkingArea
-$gutter = 8
-$panelWidth = [Math]::Min([Math]::Max(420, [Math]::Floor($area.Width * 0.34)), [Math]::Max(420, $area.Width - 640))
-$chatDesktopWidth = $area.Width - $panelWidth - $gutter
+$gutter = 0
+$chatDesktopWidth = [Math]::Floor($area.Width / 2)
+$panelWidth = $area.Width - $chatDesktopWidth
+$dpi = [CogentStackChatDesktopWindow]::GetDpiForWindow([IntPtr]$panelWindow.Handle)
+if ($dpi -le 0) { $dpi = 96 }
+$panelTopOffset = [Math]::Max(0, [Math]::Round(12 * ($dpi / 96)))
 
-Move-DesktopWindow $chatDesktopWindow $area.X $area.Y $chatDesktopWidth $area.Height
-Move-DesktopWindow $panelWindow ($area.X + $chatDesktopWidth + $gutter) $area.Y $panelWidth $area.Height
+Move-VisibleDesktopWindow $chatDesktopWindow $area.X $area.Y $chatDesktopWidth $area.Height
+Move-VisibleDesktopWindow $panelWindow ($area.X + $chatDesktopWidth) ($area.Y + $panelTopOffset) $panelWidth ($area.Height - $panelTopOffset)
 
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 [ordered]@{
@@ -246,7 +289,10 @@ New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 
 Write-CompactJson ([ordered]@{
     status = 'arranged'
-    layout = 'chatgpt-left-cogentstack-right'
+    layout = 'equal-split-chatgpt-left-cogentstack-right'
+    splitPercent = 50
+    gutter = $gutter
     panelWidth = $panelWidth
+    panelTopOffset = $panelTopOffset
     screen = [string]$screen.DeviceName
 })
