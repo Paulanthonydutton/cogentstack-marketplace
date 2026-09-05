@@ -122,6 +122,21 @@ public static class CogentStackWorkspaceWindows {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int GetWindowRgn(IntPtr hWnd, IntPtr region);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowRgn(IntPtr hWnd, IntPtr region, bool redraw);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern int GetRgnBox(IntPtr region, out RECT rectangle);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern bool DeleteObject(IntPtr value);
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
     public static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int index);
 
@@ -295,6 +310,69 @@ function Get-VisibleFrameInsets($Window) {
     }
 }
 
+function Test-WindowHasCustomRegion($Window) {
+    $probe = [CogentStackWorkspaceWindows]::CreateRectRgn(0, 0, 0, 0)
+    if ($probe -eq [IntPtr]::Zero) { throw 'Windows could not allocate a browser-region probe.' }
+    try {
+        return [CogentStackWorkspaceWindows]::GetWindowRgn([IntPtr]$Window.Handle, $probe) -ne 0
+    } finally {
+        [CogentStackWorkspaceWindows]::DeleteObject($probe) | Out-Null
+    }
+}
+
+function Clear-WindowRegion($Window) {
+    if ($Window -and [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$Window.Handle)) {
+        if (-not [CogentStackWorkspaceWindows]::SetWindowRgn([IntPtr]$Window.Handle, [IntPtr]::Zero, $true)) {
+            throw 'Windows could not clear the temporary CogentStack browser crop.'
+        }
+    }
+}
+
+function Set-WindowContentRegion($Window, $DocumentRectangle) {
+    $windowRectangle = Get-WindowRectangle $Window.Handle
+    if (-not $windowRectangle) { throw 'Windows could not measure the browser before applying its content crop.' }
+
+    $left = [int]$DocumentRectangle.x - [int]$windowRectangle.x
+    $top = [int]$DocumentRectangle.y - [int]$windowRectangle.y
+    $right = $left + [int]$DocumentRectangle.width
+    $bottom = $top + [int]$DocumentRectangle.height
+    if ($left -lt 0 -or $top -lt 0 -or $right -gt [int]$windowRectangle.width -or $bottom -gt [int]$windowRectangle.height) {
+        throw 'Chrome reported document bounds outside its window; the browser crop was not applied.'
+    }
+
+    $region = [CogentStackWorkspaceWindows]::CreateRectRgn($left, $top, $right, $bottom)
+    if ($region -eq [IntPtr]::Zero) { throw 'Windows could not allocate the CogentStack browser crop.' }
+    if (-not [CogentStackWorkspaceWindows]::SetWindowRgn([IntPtr]$Window.Handle, $region, $true)) {
+        [CogentStackWorkspaceWindows]::DeleteObject($region) | Out-Null
+        throw 'Windows could not apply the CogentStack browser crop.'
+    }
+
+    # SetWindowRgn transfers ownership of the successful region to Windows.
+    $verificationRegion = [CogentStackWorkspaceWindows]::CreateRectRgn(0, 0, 0, 0)
+    if ($verificationRegion -eq [IntPtr]::Zero) {
+        Clear-WindowRegion $Window
+        throw 'Windows could not verify the CogentStack browser crop.'
+    }
+    try {
+        $regionType = [CogentStackWorkspaceWindows]::GetWindowRgn([IntPtr]$Window.Handle, $verificationRegion)
+        $regionRectangle = New-Object CogentStackWorkspaceWindows+RECT
+        $boxType = [CogentStackWorkspaceWindows]::GetRgnBox($verificationRegion, [ref]$regionRectangle)
+        if ($regionType -eq 0 -or $boxType -eq 0 -or $regionRectangle.Left -ne $left -or $regionRectangle.Top -ne $top -or $regionRectangle.Right -ne $right -or $regionRectangle.Bottom -ne $bottom) {
+            Clear-WindowRegion $Window
+            throw 'Windows did not retain the exact CogentStack browser crop.'
+        }
+    } finally {
+        [CogentStackWorkspaceWindows]::DeleteObject($verificationRegion) | Out-Null
+    }
+
+    [ordered]@{
+        left = $left
+        top = $top
+        right = [int]$windowRectangle.width - $right
+        bottom = [int]$windowRectangle.height - $bottom
+    }
+}
+
 function Move-DesktopWindow($Window, [int]$X, [int]$Y, [int]$Width, [int]$Height) {
     [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Window.Handle, 9) | Out-Null
     if (-not [CogentStackWorkspaceWindows]::MoveWindow([IntPtr]$Window.Handle, $X, $Y, $Width, $Height, $true)) {
@@ -399,7 +477,12 @@ function Wait-WebDocumentRectangle($Window, [scriptblock]$Accept, [int]$Attempts
     return Get-WebDocumentRectangle $Window
 }
 
-function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [Int64]$OriginalStyle) {
+function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [Int64]$OriginalStyle, [bool]$ResetManagedClip) {
+    if ($ResetManagedClip) {
+        Clear-WindowRegion $Window
+    } elseif (Test-WindowHasCustomRegion $Window) {
+        throw 'Chrome already has a custom window region, so CogentStack will not replace it.'
+    }
     $documentBefore = Get-WebDocumentRectangle $Window
     $visibleBefore = Get-VisibleWindowRectangle $Window.Handle
     if (-not $documentBefore -or -not $visibleBefore) {
@@ -504,10 +587,13 @@ function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [In
     if ([int]$documentFinal.x -ne $PanelX -or [int]$documentFinal.y -ne [int]$Area.y -or [int]$documentFinal.width -ne $PanelWidth -or [int]$documentFinal.height -ne [int]$Area.height) {
         throw 'Chrome did not converge on the exact CogentStack page-only bounds.'
     }
+    $clipInsets = Set-WindowContentRegion $Window $documentFinal
     [ordered]@{
         originalStyle = $OriginalStyle
         appliedStyle = $borderlessStyle
         chromeInsets = [ordered]@{ left = $leftInset; top = $topInset; right = $rightInset; bottom = $bottomInset }
+        clipInsets = $clipInsets
+        contentClipped = $true
         contentFrame = $documentFinal
         windowFrame = Get-VisibleWindowRectangle $Window.Handle
     }
@@ -637,6 +723,7 @@ function Restore-Window($Window, $Rectangle) {
 
 function Restore-BrowserWindow($Window, $Rectangle, $Style) {
     if (-not $Window -or -not $Rectangle) { return }
+    Clear-WindowRegion $Window
     if ($null -ne $Style) {
         [CogentStackWorkspaceWindows]::SetWindowStyle([IntPtr]$Window.Handle, [Int64]$Style)
         [CogentStackWorkspaceWindows]::SetWindowPos(
@@ -799,7 +886,7 @@ $panelOriginalStyle = if ($state -and $state.PSObject.Properties['panelHandle'] 
 }
 
 $area = Get-MonitorWorkingArea $chatDesktopWindow.Handle
-$gutter = 24
+$gutter = 12
 $availableWidth = [int]$area.width - $gutter
 $chatDesktopWidth = [Math]::Floor($availableWidth / 2)
 $panelWidth = $availableWidth - $chatDesktopWidth
@@ -809,7 +896,16 @@ $backdrop = Start-WhiteBackdrop $area
 Move-VisibleDesktopWindow $chatDesktopWindow ([int]$area.x) ([int]$area.y) $chatDesktopWidth ([int]$area.height)
 $pageOnly = $null
 try {
-    $pageOnly = Set-BrowserPageOnly $panelWindow $area $panelX $panelWidth $panelOriginalStyle
+    $resetManagedClip = (
+        $state -and
+        $state.PSObject.Properties['schemaVersion'] -and
+        [int]$state.schemaVersion -ge 5 -and
+        $state.PSObject.Properties['panelHandle'] -and
+        [Int64]$state.panelHandle -eq [Int64]$panelWindow.Handle -and
+        $state.PSObject.Properties['browserContentClipped'] -and
+        [bool]$state.browserContentClipped
+    )
+    $pageOnly = Set-BrowserPageOnly $panelWindow $area $panelX $panelWidth $panelOriginalStyle ([bool]$resetManagedClip)
 } catch {
     Restore-BrowserWindow $panelWindow $panelOriginal $panelOriginalStyle
     Restore-Window $chatDesktopWindow $chatOriginal
@@ -828,7 +924,7 @@ Start-Sleep -Milliseconds 200
 $layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame $gutter
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 [ordered]@{
-    schemaVersion = 4
+    schemaVersion = 5
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
@@ -841,6 +937,8 @@ New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     backdropProcessId = [int]$backdrop.ProcessId
     browser = [string]$browser.Name
     browserContentMode = 'page-only'
+    browserContentClipped = [bool]$pageOnly.contentClipped
+    browserClipInsets = $pageOnly.clipInsets
     gutter = $gutter
     accountState = [string]$panelSelection.AccountState
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
@@ -859,6 +957,8 @@ Write-CompactJson ([ordered]@{
     whiteBackdrop = $true
     browserContentMode = 'page-only'
     browserChromeHidden = $true
+    browserContentClipped = [bool]$pageOnly.contentClipped
+    browserClipInsets = $pageOnly.clipInsets
     browser = [string]$browser.Name
     registeredDefault = [bool]$browser.IsRegisteredDefault
     reusedExistingTab = [bool]$panelSelection.ReusedExistingTab
