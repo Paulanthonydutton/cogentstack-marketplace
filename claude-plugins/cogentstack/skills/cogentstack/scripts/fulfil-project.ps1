@@ -24,6 +24,15 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 8 -Compress | Write-Output
 }
 
+function Write-DesktopAuthorizationRequired([string]$Reason) {
+    Write-CompactJson ([ordered]@{
+        status = 'desktop_authorization_required'
+        reason = $Reason
+        projectRequestPreserved = $true
+        nextAction = 'connect_desktop'
+    })
+}
+
 function Unprotect-CogentStackValue([string]$Value) {
     $protected = [Convert]::FromBase64String($Value)
     $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
@@ -88,13 +97,22 @@ function Test-ArtifactPath([string]$ArtifactPath) {
 }
 
 if (-not (Test-Path -LiteralPath $credentialPath)) {
-    Write-CompactJson ([ordered]@{ status = 'not_connected' })
+    Write-DesktopAuthorizationRequired 'missing'
     exit 0
 }
 
 $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
 $token = Unprotect-CogentStackValue ([string]$credential.token)
-$listing = Invoke-CogentStackApi -Method Get -Path '/api/plugin/project-requests?status=requested&limit=20' -Token $token
+try {
+    $listing = Invoke-CogentStackApi -Method Get -Path '/api/plugin/project-requests?status=requested&limit=20' -Token $token
+} catch {
+    $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+    if ($statusCode -eq 401) {
+        Write-DesktopAuthorizationRequired 'expired_or_revoked'
+        exit 0
+    }
+    throw
+}
 $requests = @($listing.requests)
 
 if ($Mode -eq 'inspect') {
@@ -278,4 +296,3 @@ try {
     })
     exit 1
 }
-

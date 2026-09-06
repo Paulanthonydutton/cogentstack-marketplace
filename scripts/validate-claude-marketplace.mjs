@@ -88,12 +88,44 @@ for (const forbidden of ["--app=", "--new-window", "{F11}", "SetParent(", "FindW
   if (panelSource.includes(forbidden)) fail(`companion helper crosses the supported window boundary: ${forbidden}`);
 }
 
+const validateExistingTabReuse = (source, label) => {
+  for (const marker of [
+    "ConvertTo-CogentStackUri",
+    "Test-CogentStackHomeAddress",
+    "Set-BrowserWorkspaceAddress",
+    "Wait-AccountState",
+    "CogentStack \\| AI Production Stack",
+    "$reusedExistingTab = [bool]$panelSelection",
+    "$reusedExistingHomeTab = [bool]$panelSelection.IsHome",
+    "$signedInHome",
+    "$homeWindow",
+    "if (-not $isWorkspace -and -not $isHome)",
+    "if (-not [bool]$panelSelection.IsWorkspace)",
+    "reusedExistingHomeTab = $reusedExistingHomeTab",
+  ]) {
+    if (!source.includes(marker)) fail(`${label} helper is missing existing-tab reuse marker: ${marker}`);
+  }
+  if (source.includes("reusedExistingTab = [bool]$panelSelection.ReusedExistingTab")) {
+    fail(`${label} helper still reports a newly opened tab as reused`);
+  }
+  const selectionIndex = source.indexOf("$panelSelection = Find-ExistingCogentStackWindow");
+  const reuseIndex = source.indexOf("if ($panelSelection)", selectionIndex);
+  const newTabIndex = source.indexOf("Start-Process -FilePath $preferredBrowser.ExecutablePath", selectionIndex);
+  if (selectionIndex < 0 || reuseIndex < selectionIndex || newTabIndex < reuseIndex) {
+    fail(`${label} helper must reuse and navigate an existing CogentStack tab before opening a new tab`);
+  }
+};
+
+validateExistingTabReuse(panelSource, "Claude");
+const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "scripts");
+const codexCompanionSource = await readFile(join(codexScriptsRoot, "open-cogentstack-companion.ps1"), "utf8");
+validateExistingTabReuse(codexCompanionSource, "Codex");
+
 const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
 for (const marker of ["Get-Process -Name Claude", "Hide sidebar", "Show sidebar", "already_hidden"]) {
   if (!sidebarSource.includes(marker)) fail(`Claude sidebar helper is missing required marker: ${marker}`);
 }
 
-const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "scripts");
 const parityPairs = [
   ["native-command.ps1", []],
   ["connect-cogentstack.ps1", [
