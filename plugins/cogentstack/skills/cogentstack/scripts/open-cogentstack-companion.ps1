@@ -616,6 +616,12 @@ function Test-CompanionSuspendAddress([string]$Address) {
     return $parsed.Query -match '(?i)(?:^|[?&])companion=suspend(?:&|$)'
 }
 
+function Test-CompanionResumeAddress([string]$Address) {
+    $parsed = ConvertTo-CogentStackUri $Address
+    if ($null -eq $parsed -or $parsed.AbsolutePath -ne '/stack') { return $false }
+    return $parsed.Query -match '(?i)(?:^|[?&])companion=resume(?:&|$)'
+}
+
 function Test-CompanionOwnedAddress([string]$Address) {
     if (-not $Address) { return $false }
     return Test-CogentStackAddress $Address
@@ -1041,12 +1047,14 @@ function Suspend-CompanionLayout($State, [bool]$MaximizeBrowser = $true) {
     $State | Add-Member -MemberType NoteProperty -Name browserContentClipped -Value $false -Force
     $State | Add-Member -MemberType NoteProperty -Name suspendedAt -Value ([DateTimeOffset]::UtcNow.ToString('O')) -Force
     Set-LayoutStateStatus $State 'suspended'
+    $watcher = Start-CompanionExitWatcher
     return [ordered]@{
         status = 'suspended'
         suspended = $true
         fastResumeAvailable = $true
         browserWindowRestored = [bool]$restore.browserWindowRestored
         browserWindowMaximized = [bool]$restore.browserWindowMaximized
+        companionWatcherStarted = [bool]$watcher
         shortcut = Install-WorkModeShortcut
     }
 }
@@ -1065,9 +1073,20 @@ function Resume-CompanionLayout($State) {
         return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false; reason = 'remembered_workspace_tab_unavailable' }
     }
     $workspaceUrl = if ($State.PSObject.Properties['workspaceUrl']) { [string]$State.workspaceUrl } else { 'https://cogentstack.app/stack?surface=chatgpt' }
-    if (Test-CompanionSuspendAddress (Get-BrowserAddressValue $panelWindow)) {
+    $panelAddress = Get-BrowserAddressValue $panelWindow
+    if ((Test-CompanionSuspendAddress $panelAddress) -or (Test-CompanionResumeAddress $panelAddress)) {
         if (-not (Set-BrowserWorkspaceAddress $panelWindow $workspaceUrl)) {
             return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false; reason = 'workspace_address_not_restored' }
+        }
+    }
+    $layoutStatus = if ($State.PSObject.Properties['layoutStatus']) { [string]$State.layoutStatus } else { 'active' }
+    if ($layoutStatus -eq 'active') {
+        $watcher = Start-CompanionExitWatcher
+        return [ordered]@{
+            status = 'already_active'
+            resumed = $true
+            fastResumeAvailable = $true
+            companionExitWatcherStarted = [bool]$watcher
         }
     }
     $area = Get-MonitorWorkingArea $chatWindow.Handle
@@ -1218,20 +1237,30 @@ if ($Mode -eq 'WatchExit') {
         while ($true) {
             $watchState = Read-LayoutState
             if (-not $watchState) { break }
-            if ($watchState.PSObject.Properties['layoutStatus'] -and [string]$watchState.layoutStatus -eq 'suspended') { break }
             $watchPanel = Find-RememberedWindow $watchState 'panel'
             if (-not $watchPanel) { break }
             $watchAddress = Get-BrowserAddressValue $watchPanel
+            $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
             if (Test-CompanionExitAddress $watchAddress) {
                 Restore-CompanionLayout $watchState $false $true $true | Out-Null
                 break
+            }
+            if (Test-CompanionResumeAddress $watchAddress) {
+                Resume-CompanionLayout $watchState | Out-Null
+                Start-Sleep -Milliseconds 250
+                continue
+            }
+            if ($layoutStatus -eq 'suspended') {
+                Start-Sleep -Milliseconds 250
+                continue
             }
             if (
                 (Test-CompanionSuspendAddress $watchAddress) -or
                 ($watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress))
             ) {
                 Suspend-CompanionLayout $watchState $true | Out-Null
-                break
+                Start-Sleep -Milliseconds 250
+                continue
             }
             Start-Sleep -Milliseconds 250
         }
