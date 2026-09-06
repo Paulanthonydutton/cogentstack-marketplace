@@ -81,6 +81,10 @@ for (const marker of [
   "opened_unarranged",
   "accountState",
   "layoutVerified",
+  "Test-CogentStackTerminalInstallAddress",
+  "Remove-TerminalCogentStackInstallationTabs",
+  "Select-BrowserTabCandidate $panelSelection",
+  "retiredCompletedInstallTabs",
 ]) {
   if (!panelSource.includes(marker)) fail(`companion helper is missing required marker: ${marker}`);
 }
@@ -99,9 +103,11 @@ const validateExistingTabReuse = (source, label) => {
     "$reusedExistingHomeTab = [bool]$panelSelection.IsHome",
     "$signedInHome",
     "$homeWindow",
-    "if (-not $isWorkspace -and -not $isHome)",
+    "if (-not $isWorkspace -and -not $isHome -and -not $isTerminalInstall)",
     "if (-not [bool]$panelSelection.IsWorkspace)",
     "reusedExistingHomeTab = $reusedExistingHomeTab",
+    "reusedTerminalInstallTab = $reusedTerminalInstallTab",
+    "retiredCompletedInstallTabs = $retiredCompletedInstallTabs",
   ]) {
     if (!source.includes(marker)) fail(`${label} helper is missing existing-tab reuse marker: ${marker}`);
   }
