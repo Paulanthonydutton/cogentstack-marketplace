@@ -636,7 +636,7 @@ function Select-RememberedCogentStackWorkspaceTab($Window) {
             [System.Windows.Automation.ControlType]::TabItem
         )
         foreach ($tab in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCondition)) {
-            if ([string]$tab.Current.Name -notmatch '(?i)^CogentStack \| Create or open a project(?:\s+-\s+Memory usage.*)?$') { continue }
+            if (-not (Test-CogentStackWorkspaceTitle ([string]$tab.Current.Name))) { continue }
             $selectionPattern = $null
             if (-not $tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) { continue }
             ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Select()
@@ -656,7 +656,7 @@ function Get-WebDocumentRectangle($Window) {
         )
         $documents = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $documentCondition)
         foreach ($document in $documents) {
-            if ([string]$document.Current.Name -notmatch '(?i)^CogentStack \| Create or open a project$') { continue }
+            if (-not (Test-CogentStackWorkspaceTitle ([string]$document.Current.Name))) { continue }
             $rectangle = $document.Current.BoundingRectangle
             if ($rectangle.Width -le 0 -or $rectangle.Height -le 0) { continue }
             return [ordered]@{
@@ -668,6 +668,10 @@ function Get-WebDocumentRectangle($Window) {
         }
     } catch {}
     return $null
+}
+
+function Test-CogentStackWorkspaceTitle([string]$Title) {
+    return [bool]($Title -match '(?i)^CogentStack \| Create or (?:edit|open) a project(?:\s+-\s+Memory usage.*)?$')
 }
 
 function Wait-WebDocumentRectangle($Window, [scriptblock]$Accept, [int]$Attempts = 30) {
@@ -812,7 +816,7 @@ function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
         $tabs = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCondition)
         foreach ($tab in $tabs) {
             $tabName = [string]$tab.Current.Name
-            $isWorkspaceTitle = $tabName -match '(?i)^CogentStack \| Create or open a project(?:\s+-\s+Memory usage.*)?$'
+            $isWorkspaceTitle = Test-CogentStackWorkspaceTitle $tabName
             $isHomeTitle = $tabName -match '(?i)^CogentStack \| AI Production Stack(?:\s+-\s+Memory usage.*)?$'
             $isTerminalInstallTitle = $tabName -match '(?i)^(?:Completed|Replaced) installation \| CogentStack(?:\s+-\s+Memory usage.*)?$'
             if (-not $isWorkspaceTitle -and -not $isHomeTitle -and -not $isTerminalInstallTitle -and $tabName -notmatch '(?i)CogentStack') { continue }
@@ -849,7 +853,7 @@ function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
                 HasTabStrip = $true
             }
         }
-        if ($results.Count -eq 0 -and $Window.Title -match '(?i)^CogentStack \| Create or open a project') {
+        if ($results.Count -eq 0 -and (Test-CogentStackWorkspaceTitle ([string]$Window.Title))) {
             $results += [pscustomobject]@{
                 Window = $Window
                 Browser = $Browser
@@ -863,7 +867,7 @@ function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
             }
         }
     } catch {
-        if ($Window.Title -match '(?i)^CogentStack \| Create or open a project') {
+        if (Test-CogentStackWorkspaceTitle ([string]$Window.Title)) {
             $results += [pscustomobject]@{
                 Window = $Window
                 Browser = $Browser
@@ -905,11 +909,28 @@ function Find-BackdropWindow {
     @(Get-DesktopWindows | Where-Object { $_.Title -eq $backdropTitle -and $_.ProcessName -match '(?i)^(powershell|pwsh)$' } | Select-Object -First 1)
 }
 
-function Start-WhiteBackdrop($Area) {
+function Set-WhiteBackdropLayer($Backdrop, $BehindWindow) {
+    if (-not $Backdrop -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$Backdrop.Handle) -or
+        -not $BehindWindow -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$BehindWindow.Handle)) {
+        throw 'The white CogentStack workspace background is unavailable.'
+    }
+    [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Backdrop.Handle, 5) | Out-Null
+    # Some DWM configurations keep a borderless form in the desktop's lower band.
+    # Promote then demote it, and finally anchor it immediately behind the Codex
+    # window. This leaves both companion panels above it and the wallpaper below it.
+    $promoted = [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Backdrop.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x0013)
+    $demoted = [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Backdrop.Handle, [IntPtr](-2), 0, 0, 0, 0, 0x0013)
+    $anchored = [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Backdrop.Handle, [IntPtr]$BehindWindow.Handle, 0, 0, 0, 0, 0x0013)
+    if (-not $promoted -or -not $demoted -or -not $anchored) {
+        throw 'Windows could not place the white CogentStack background behind the workspace panels.'
+    }
+}
+
+function Start-WhiteBackdrop($Area, $BehindWindow) {
     $existing = @(Find-BackdropWindow | Select-Object -First 1)
     if ($existing) {
         Move-DesktopWindow $existing ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
-        [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$existing.Handle, [IntPtr]1, 0, 0, 0, 0, 0x0013) | Out-Null
+        Set-WhiteBackdropLayer $existing $BehindWindow
         return $existing
     }
 
@@ -947,7 +968,7 @@ Add-Type -AssemblyName System.Drawing
         $backdrop = @(Get-DesktopWindows | Where-Object { $_.ProcessId -eq $backdropProcess.Id -and $_.Title -eq $backdropTitle } | Select-Object -First 1)
     }
     if (-not $backdrop) { throw 'Windows could not create the white CogentStack workspace background.' }
-    [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$backdrop.Handle, [IntPtr]1, 0, 0, 0, 0, 0x0013) | Out-Null
+    Set-WhiteBackdropLayer $backdrop $BehindWindow
     return $backdrop
 }
 
@@ -1081,11 +1102,28 @@ function Resume-CompanionLayout($State) {
     }
     $layoutStatus = if ($State.PSObject.Properties['layoutStatus']) { [string]$State.layoutStatus } else { 'active' }
     if ($layoutStatus -eq 'active') {
+        $activeArea = Get-MonitorWorkingArea $chatWindow.Handle
+        $activeBackdrop = Find-RememberedWindow $State 'backdrop'
+        if (-not $activeBackdrop) {
+            $activeBackdrop = Start-WhiteBackdrop $activeArea $chatWindow
+            $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$activeBackdrop.Handle) -Force
+            $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$activeBackdrop.ProcessId) -Force
+            Save-LayoutState $State
+        } else {
+            Move-DesktopWindow $activeBackdrop ([int]$activeArea.x) ([int]$activeArea.y) ([int]$activeArea.width) ([int]$activeArea.height)
+            Set-WhiteBackdropLayer $activeBackdrop $chatWindow
+        }
+        [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$panelWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
+        [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$chatWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
+        [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$panelWindow.Handle) | Out-Null
+        [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$chatWindow.Handle) | Out-Null
         $watcher = Start-CompanionExitWatcher
         return [ordered]@{
             status = 'already_active'
             resumed = $true
             fastResumeAvailable = $true
+            whiteBackdrop = [bool]$activeBackdrop
+            backdropLayer = if ($activeBackdrop) { 'above-desktop-behind-panels' } else { 'missing' }
             companionExitWatcherStarted = [bool]$watcher
         }
     }
@@ -1098,10 +1136,9 @@ function Resume-CompanionLayout($State) {
     $backdrop = Find-RememberedWindow $State 'backdrop'
     if ($backdrop) {
         Move-DesktopWindow $backdrop ([int]$area.x) ([int]$area.y) ([int]$area.width) ([int]$area.height)
-        [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$backdrop.Handle, 5) | Out-Null
-        [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$backdrop.Handle, [IntPtr]1, 0, 0, 0, 0, 0x0013) | Out-Null
+        Set-WhiteBackdropLayer $backdrop $chatWindow
     } else {
-        $backdrop = Start-WhiteBackdrop $area
+        $backdrop = Start-WhiteBackdrop $area $chatWindow
     }
     Move-VisibleDesktopWindow $chatWindow ([int]$area.x) ([int]$area.y) $chatWidth ([int]$area.height)
     $pageOnly = $null
@@ -1137,6 +1174,8 @@ function Resume-CompanionLayout($State) {
         layoutVerified = [bool]$layout.verified
         splitPercent = 50
         gutter = $gutter
+        whiteBackdrop = $true
+        backdropLayer = 'above-desktop-behind-panels'
         companionExitWatcherStarted = [bool]$watcher
         shortcut = Install-WorkModeShortcut
     }
@@ -1432,7 +1471,7 @@ $availableWidth = [int]$area.width - $gutter
 $chatDesktopWidth = [Math]::Floor($availableWidth / 2)
 $panelWidth = $availableWidth - $chatDesktopWidth
 $panelX = [int]$area.x + $chatDesktopWidth + $gutter
-$backdrop = Start-WhiteBackdrop $area
+$backdrop = Start-WhiteBackdrop $area $chatDesktopWindow
 
 Move-VisibleDesktopWindow $chatDesktopWindow ([int]$area.x) ([int]$area.y) $chatDesktopWidth ([int]$area.height)
 $pageOnly = $null
@@ -1507,6 +1546,7 @@ Write-CompactJson ([ordered]@{
     splitPercent = 50
     gutter = $gutter
     whiteBackdrop = $true
+    backdropLayer = 'above-desktop-behind-panels'
     browserContentMode = 'page-only'
     browserChromeHidden = $true
     browserContentClipped = [bool]$pageOnly.contentClipped
