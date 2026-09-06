@@ -76,6 +76,12 @@ for (const marker of [
   "Set-BrowserPageOnly",
   "Start-WhiteBackdrop",
   "Start-CompanionExitWatcher",
+  "Test-CompanionOwnedAddress",
+  "Test-CompanionSuspendAddress",
+  "Suspend-CompanionLayout",
+  "Resume-CompanionLayout",
+  "CogentStack Work Mode (Claude).lnk",
+  "$watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress)",
   "Restore-CompanionLayout $watchState $false $true $true",
   "claude-companion-layout.json",
   "opened_unarranged",
@@ -126,6 +132,17 @@ validateExistingTabReuse(panelSource, "Claude");
 const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "scripts");
 const codexCompanionSource = await readFile(join(codexScriptsRoot, "open-cogentstack-companion.ps1"), "utf8");
 validateExistingTabReuse(codexCompanionSource, "Codex");
+for (const marker of [
+  "Test-CompanionOwnedAddress",
+  "Test-CompanionSuspendAddress",
+  "Suspend-CompanionLayout",
+  "Resume-CompanionLayout",
+  "CogentStack Work Mode (Codex).lnk",
+  "$watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress)",
+  "($Mode -eq 'Close')",
+]) {
+  if (!codexCompanionSource.includes(marker)) fail(`Codex companion helper is missing navigation recovery marker: ${marker}`);
+}
 
 const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
 for (const marker of ["Get-Process -Name Claude", "Hide sidebar", "Show sidebar", "already_hidden"]) {

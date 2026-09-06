@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'WatchExit')]
+    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'Suspend', 'Resume', 'Toggle', 'InstallToggle', 'WatchExit')]
     [string]$Mode = 'Open',
     [string]$Url = 'https://cogentstack.app/stack?surface=chatgpt'
 )
@@ -398,6 +398,17 @@ function Read-LayoutState {
     try { return Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json } catch { return $null }
 }
 
+function Save-LayoutState($State) {
+    New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+    $State | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $statePath -Encoding UTF8
+}
+
+function Set-LayoutStateStatus($State, [string]$Status) {
+    $State | Add-Member -MemberType NoteProperty -Name layoutStatus -Value $Status -Force
+    $State | Add-Member -MemberType NoteProperty -Name updatedAt -Value ([DateTimeOffset]::UtcNow.ToString('O')) -Force
+    Save-LayoutState $State
+}
+
 function Find-RememberedWindow($State, [string]$Kind) {
     if ($null -eq $State) { return $null }
     $handleProperty = switch ($Kind) {
@@ -597,6 +608,37 @@ function Set-BrowserWorkspaceAddress($Window, [string]$TargetUrl) {
 function Test-CompanionExitAddress([string]$Address) {
     if (-not $Address) { return $false }
     return $Address -match '^(?:https?://)?(?:www\.)?cogentstack\.app/?(?:\?companion=close(?:#.*)?)?$'
+}
+
+function Test-CompanionSuspendAddress([string]$Address) {
+    $parsed = ConvertTo-CogentStackUri $Address
+    if ($null -eq $parsed -or $parsed.AbsolutePath -ne '/stack') { return $false }
+    return $parsed.Query -match '(?i)(?:^|[?&])companion=suspend(?:&|$)'
+}
+
+function Test-CompanionOwnedAddress([string]$Address) {
+    if (-not $Address) { return $false }
+    return Test-CogentStackAddress $Address
+}
+
+function Select-RememberedCogentStackWorkspaceTab($Window) {
+    if (Test-CogentStackWorkspaceAddress (Get-BrowserAddressValue $Window)) { return $true }
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
+        $tabCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::TabItem
+        )
+        foreach ($tab in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCondition)) {
+            if ([string]$tab.Current.Name -notmatch '(?i)^CogentStack \| Create or open a project(?:\s+-\s+Memory usage.*)?$') { continue }
+            $selectionPattern = $null
+            if (-not $tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) { continue }
+            ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Select()
+            Start-Sleep -Milliseconds 250
+            if (Test-CogentStackWorkspaceAddress (Get-BrowserAddressValue $Window)) { return $true }
+        }
+    } catch {}
+    return $false
 }
 
 function Get-WebDocumentRectangle($Window) {
@@ -966,6 +1008,131 @@ function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState
     }
 }
 
+function Install-WorkModeShortcut {
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $powershellCommand) { return $null }
+    $programs = [Environment]::GetFolderPath('Programs')
+    if (-not $programs) { return $null }
+    $shortcutRoot = Join-Path $programs 'CogentStack'
+    $shortcutPath = Join-Path $shortcutRoot 'CogentStack Work Mode (Codex).lnk'
+    New-Item -ItemType Directory -Path $shortcutRoot -Force | Out-Null
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = [string]$powershellCommand.Source
+    $shortcut.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Mode Toggle"
+    $shortcut.WorkingDirectory = Split-Path -Parent $PSCommandPath
+    $shortcut.Description = 'Suspend or resume the existing CogentStack and Codex split-screen work mode.'
+    $shortcut.Save()
+    return $shortcutPath
+}
+
+function Suspend-CompanionLayout($State, [bool]$MaximizeBrowser = $true) {
+    if (-not $State) {
+        return [ordered]@{ status = 'cold_start_required'; suspended = $false; fastResumeAvailable = $false }
+    }
+    $chatWindow = Find-RememberedWindow $State 'chatDesktop'
+    $panelWindow = Find-RememberedWindow $State 'panel'
+    if (-not $chatWindow -or -not $panelWindow) {
+        if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }
+        return [ordered]@{ status = 'cold_start_required'; suspended = $false; fastResumeAvailable = $false }
+    }
+    $restore = Restore-CompanionLayout $State $true $false $MaximizeBrowser
+    $State | Add-Member -MemberType NoteProperty -Name browserContentMode -Value 'normal-window' -Force
+    $State | Add-Member -MemberType NoteProperty -Name browserContentClipped -Value $false -Force
+    $State | Add-Member -MemberType NoteProperty -Name suspendedAt -Value ([DateTimeOffset]::UtcNow.ToString('O')) -Force
+    Set-LayoutStateStatus $State 'suspended'
+    return [ordered]@{
+        status = 'suspended'
+        suspended = $true
+        fastResumeAvailable = $true
+        browserWindowRestored = [bool]$restore.browserWindowRestored
+        browserWindowMaximized = [bool]$restore.browserWindowMaximized
+        shortcut = Install-WorkModeShortcut
+    }
+}
+
+function Resume-CompanionLayout($State) {
+    if (-not $State) {
+        return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false }
+    }
+    $chatWindow = Find-RememberedWindow $State 'chatDesktop'
+    $panelWindow = Find-RememberedWindow $State 'panel'
+    if (-not $chatWindow -or -not $panelWindow) {
+        if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }
+        return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false }
+    }
+    if (-not (Select-RememberedCogentStackWorkspaceTab $panelWindow)) {
+        return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false; reason = 'remembered_workspace_tab_unavailable' }
+    }
+    $workspaceUrl = if ($State.PSObject.Properties['workspaceUrl']) { [string]$State.workspaceUrl } else { 'https://cogentstack.app/stack?surface=chatgpt' }
+    if (Test-CompanionSuspendAddress (Get-BrowserAddressValue $panelWindow)) {
+        if (-not (Set-BrowserWorkspaceAddress $panelWindow $workspaceUrl)) {
+            return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false; reason = 'workspace_address_not_restored' }
+        }
+    }
+    $area = Get-MonitorWorkingArea $chatWindow.Handle
+    $gutter = if ($State.PSObject.Properties['gutter']) { [int]$State.gutter } else { 12 }
+    $availableWidth = [int]$area.width - $gutter
+    $chatWidth = [Math]::Floor($availableWidth / 2)
+    $panelWidth = $availableWidth - $chatWidth
+    $panelX = [int]$area.x + $chatWidth + $gutter
+    $backdrop = Find-RememberedWindow $State 'backdrop'
+    if ($backdrop) {
+        Move-DesktopWindow $backdrop ([int]$area.x) ([int]$area.y) ([int]$area.width) ([int]$area.height)
+        [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$backdrop.Handle, 5) | Out-Null
+        [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$backdrop.Handle, [IntPtr]1, 0, 0, 0, 0, 0x0013) | Out-Null
+    } else {
+        $backdrop = Start-WhiteBackdrop $area
+    }
+    Move-VisibleDesktopWindow $chatWindow ([int]$area.x) ([int]$area.y) $chatWidth ([int]$area.height)
+    $pageOnly = $null
+    try {
+        $originalStyle = [Int64]$State.panelOriginalStyle
+        $pageOnly = Set-BrowserPageOnly $panelWindow $area $panelX $panelWidth $originalStyle $false
+    } catch {
+        Restore-BrowserWindow $panelWindow $State.panelOriginal ([Int64]$State.panelOriginalStyle)
+        Restore-Window $chatWindow $State.chatDesktopOriginal
+        if ($backdrop -and [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$backdrop.Handle)) {
+            [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$backdrop.Handle, 0) | Out-Null
+        }
+        throw
+    }
+    [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$chatWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
+    [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$panelWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
+    [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$panelWindow.Handle) | Out-Null
+    [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$chatWindow.Handle) | Out-Null
+    [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$chatWindow.Handle) | Out-Null
+    Start-Sleep -Milliseconds 200
+    $layout = Test-WorkspaceLayout $area $chatWindow $pageOnly.contentFrame $gutter
+    $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$backdrop.Handle) -Force
+    $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$backdrop.ProcessId) -Force
+    $State | Add-Member -MemberType NoteProperty -Name browserContentMode -Value 'page-only' -Force
+    $State | Add-Member -MemberType NoteProperty -Name browserContentClipped -Value ([bool]$pageOnly.contentClipped) -Force
+    $State | Add-Member -MemberType NoteProperty -Name browserClipInsets -Value $pageOnly.clipInsets -Force
+    Set-LayoutStateStatus $State 'active'
+    $watcher = Start-CompanionExitWatcher
+    return [ordered]@{
+        status = if ($layout.verified) { 'resumed' } else { 'resumed_unverified' }
+        resumed = $true
+        fastResumeAvailable = $true
+        layoutVerified = [bool]$layout.verified
+        splitPercent = 50
+        gutter = $gutter
+        companionExitWatcherStarted = [bool]$watcher
+        shortcut = Install-WorkModeShortcut
+    }
+}
+
+function Show-ColdStartRequired {
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show(
+        'The previous CogentStack work mode is no longer available. Open CogentStack from Codex once to establish a fresh split screen.',
+        'CogentStack Work Mode',
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    ) | Out-Null
+}
+
 function Start-CompanionExitWatcher {
     $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     $powershellPath = if ($powershellCommand) { [string]$powershellCommand.Source } else { $null }
@@ -1017,6 +1184,31 @@ $state = Read-LayoutState
 $browsers = @(Get-CompanionBrowsers)
 $chatDesktopWindow = @(Get-ChatDesktopWindow | Select-Object -First 1)
 
+if ($Mode -eq 'InstallToggle') {
+    $shortcut = Install-WorkModeShortcut
+    Write-CompactJson ([ordered]@{ status = if ($shortcut) { 'installed' } else { 'unavailable' }; shortcut = $shortcut })
+    exit $(if ($shortcut) { 0 } else { 2 })
+}
+
+if ($Mode -eq 'Suspend') {
+    Write-CompactJson (Suspend-CompanionLayout $state $true)
+    exit 0
+}
+
+if ($Mode -eq 'Resume') {
+    $resume = Resume-CompanionLayout $state
+    Write-CompactJson $resume
+    exit $(if ($resume.resumed) { 0 } else { 2 })
+}
+
+if ($Mode -eq 'Toggle') {
+    $layoutStatus = if ($state -and $state.PSObject.Properties['layoutStatus']) { [string]$state.layoutStatus } else { 'active' }
+    $toggle = if ($state -and $layoutStatus -eq 'active') { Suspend-CompanionLayout $state $true } else { Resume-CompanionLayout $state }
+    if ($toggle.status -eq 'cold_start_required') { Show-ColdStartRequired }
+    Write-CompactJson $toggle
+    exit $(if ($toggle.status -eq 'cold_start_required') { 2 } else { 0 })
+}
+
 if ($Mode -eq 'WatchExit') {
     $watcherMutex = New-Object System.Threading.Mutex($false, 'Local\CogentStackCompanionExitWatcher')
     $ownsMutex = $false
@@ -1026,10 +1218,19 @@ if ($Mode -eq 'WatchExit') {
         while ($true) {
             $watchState = Read-LayoutState
             if (-not $watchState) { break }
+            if ($watchState.PSObject.Properties['layoutStatus'] -and [string]$watchState.layoutStatus -eq 'suspended') { break }
             $watchPanel = Find-RememberedWindow $watchState 'panel'
             if (-not $watchPanel) { break }
-            if (Test-CompanionExitAddress (Get-BrowserAddressValue $watchPanel)) {
+            $watchAddress = Get-BrowserAddressValue $watchPanel
+            if (Test-CompanionExitAddress $watchAddress) {
                 Restore-CompanionLayout $watchState $false $true $true | Out-Null
+                break
+            }
+            if (
+                (Test-CompanionSuspendAddress $watchAddress) -or
+                ($watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress))
+            ) {
+                Suspend-CompanionLayout $watchState $true | Out-Null
                 break
             }
             Start-Sleep -Milliseconds 250
@@ -1053,19 +1254,39 @@ if ($Mode -eq 'Inspect') {
         registeredDefault = if ($existingPanel) { [bool]$existingPanel.Browser.IsRegisteredDefault } elseif ($browsers.Count -gt 0) { [bool]$browsers[0].IsRegisteredDefault } else { $false }
         launchMode = 'reuse-existing-browser-tab'
         browserContentMode = if ($state -and $state.PSObject.Properties['browserContentMode']) { [string]$state.browserContentMode } else { 'normal-window' }
+        layoutStatus = if ($state -and $state.PSObject.Properties['layoutStatus']) { [string]$state.layoutStatus } else { 'inactive' }
+        fastResumeAvailable = [bool]($state -and $state.PSObject.Properties['layoutStatus'] -and [string]$state.layoutStatus -eq 'suspended')
         gutter = if ($state -and $state.PSObject.Properties['gutter']) { [int]$state.gutter } else { 0 }
         whiteBackdrop = [bool](Find-BackdropWindow)
     })
     exit 0
 }
 
-if ($Mode -in @('Hide', 'Close')) {
-    $restore = Restore-CompanionLayout $state ($Mode -eq 'Hide') ($Mode -eq 'Close') $false
+if ($Mode -eq 'Hide') {
+    $restore = Restore-CompanionLayout $state $true $false $false
+    if ($state) {
+        $state | Add-Member -MemberType NoteProperty -Name browserContentMode -Value 'normal-window' -Force
+        $state | Add-Member -MemberType NoteProperty -Name browserContentClipped -Value $false -Force
+        Set-LayoutStateStatus $state 'suspended'
+    }
     Write-CompactJson ([ordered]@{
-        status = $Mode.ToLowerInvariant()
+        status = 'hide'
         browserWindowRestored = [bool]$restore.browserWindowRestored
         browserWindowMaximized = [bool]$restore.browserWindowMaximized
         backdropFound = [bool]$restore.backdropFound
+        fastResumeAvailable = [bool]$state
+    })
+    exit 0
+}
+
+if ($Mode -eq 'Close') {
+    $restore = Restore-CompanionLayout $state $false $true $true
+    Write-CompactJson ([ordered]@{
+        status = 'close'
+        browserWindowRestored = [bool]$restore.browserWindowRestored
+        browserWindowMaximized = [bool]$restore.browserWindowMaximized
+        backdropFound = [bool]$restore.backdropFound
+        fastResumeAvailable = $false
     })
     exit 0
 }
@@ -1214,8 +1435,8 @@ Start-Sleep -Milliseconds 200
 
 $layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame $gutter
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
-[ordered]@{
-    schemaVersion = 6
+$layoutState = [ordered]@{
+    schemaVersion = 7
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
@@ -1237,10 +1458,14 @@ New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     browserClipInsets = $pageOnly.clipInsets
     gutter = $gutter
     accountState = [string]$panelSelection.AccountState
+    workspaceUrl = $safeUrl
+    layoutStatus = 'active'
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
-} | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
+}
+Save-LayoutState $layoutState
 
 $exitWatcher = Start-CompanionExitWatcher
+$workModeShortcut = Install-WorkModeShortcut
 
 Write-CompactJson ([ordered]@{
     status = if ($layout.verified) { 'arranged' } else { 'opened_unarranged' }
@@ -1257,7 +1482,10 @@ Write-CompactJson ([ordered]@{
     browserChromeHidden = $true
     browserContentClipped = [bool]$pageOnly.contentClipped
     companionExitControl = 'header-x'
+    companionSuspendControl = 'header-collapse'
     companionExitWatcherStarted = [bool]$exitWatcher
+    fastResumeAvailable = $true
+    workModeShortcut = $workModeShortcut
     browserClipInsets = $pageOnly.clipInsets
     browser = [string]$browser.Name
     registeredDefault = [bool]$browser.IsRegisteredDefault
