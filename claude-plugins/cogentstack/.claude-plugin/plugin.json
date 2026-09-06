@@ -1,6 +1,6 @@
 {
   "name": "cogentstack",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Reuse an existing CogentStack browser tab beside Claude Code Desktop and fulfil explicitly approved Contract Pack projects.",
   "author": {
     "name": "CogentStack"

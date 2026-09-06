@@ -1,6 +1,6 @@
 ---
 name: cogentstack
-description: Open the hosted CogentStack workspace as a signed-in browser companion beside Claude Code Desktop on Windows, securely authorize this desktop when explicitly requested, turn a natural-language brief into an explicitly approved project, prepare an approved deployment handoff, or execute a project deletion explicitly approved in CogentStack. Use when the user invokes CogentStack, $cogentstack, or asks to open, hide, close, connect, or use the CogentStack companion panel. This integration is for Claude Code Desktop; do not substitute a Claude Web flow.
+description: Open the hosted CogentStack workspace as a signed-in browser companion beside Claude Code Desktop on Windows, claim an account-bound installation request, renew that installation securely, turn a natural-language brief into an explicitly approved project, prepare an approved deployment handoff, or execute a project deletion explicitly approved in CogentStack. Use when the user invokes CogentStack, $cogentstack, or asks to open, hide, close, connect, or use the CogentStack companion panel. This integration is for Claude Code Desktop; do not substitute a Claude Web flow.
 ---
 
 # Use CogentStack with Claude Code Desktop
@@ -9,7 +9,7 @@ CogentStack's public Claude plugin reuses a normal Google Chrome or Microsoft Ed
 
 The companion layout hides Claude's sidebar when its accessible toggle can be identified, places Claude and the CogentStack page at equal width over a white backdrop, leaves a 12-pixel vertical divider, and clips ordinary browser controls so the right side reads as a page-only working panel. It never uses browser F11 fullscreen. The CogentStack surface supplies the sticky header, contextual sponsored strip, visible account state, and an X control that returns the browser to the CogentStack home page in a maximized normal window.
 
-The plugin does not distribute contracts, task blueprints, compatibility rules, licence-validation logic, or a local project generator. CogentStack's protected server produces request-bound artifacts, and the local helper verifies and writes only an artifact the user explicitly approved. The public package does not activate protected access: CogentStack's website must authenticate the account and record that account's acceptance of the current versioned Terms and EULA before the service may issue a Desktop credential. Never collect assent, credentials, or licence details in Claude.
+The plugin does not distribute contracts, task blueprints, compatibility rules, licence-validation logic, or a local project generator. CogentStack's protected server produces request-bound artifacts, and the local helper verifies and writes only an artifact the user explicitly approved. The public package does not activate protected access. The installation page must authenticate the CogentStack account and record an explicit acceptance of the current versioned Terms and EULA for that installation before it creates an opaque `cgb_...` installation request. That reference is the only permitted handoff into Claude: it is private, short-lived, single-use, and binds the website account and confirmation to the Windows installation. Never collect assent, login details, licence details, or Desktop credentials in Claude. The resulting DPAPI-protected installation credential may renew without another legal confirmation while it remains the account's one active ChatGPT or Claude Desktop installation.
 
 Use `${CLAUDE_PLUGIN_ROOT}` for every bundled script path. Never assume the marketplace checkout or plugin cache location.
 
@@ -41,16 +41,15 @@ When the user clicks the CogentStack header X, the watcher returns the reused ta
 
 Workspace browsing is public. Sign-in and entitlement checks begin only when the user asks to connect Claude Desktop or chooses a protected contract action.
 
-## Connect Claude Code Desktop
+## Claim the account-bound Claude Code Desktop installation
 
-When the user explicitly asks to sign in, connect, or authorize Claude Desktop:
+When the user pastes the private installation message created by `https://cogentstack.app/claude`:
 
-1. Run `connect-cogentstack.ps1` with its default `start` mode from this skill's scripts directory. It opens the official CogentStack website in the system default browser.
-2. Do not show, describe, or ask the user to enter an authorization code. If the browser is already signed in, ask the user to review and accept the current Terms and EULA if the website requires it, then select **Continue to Claude Desktop**. Otherwise, ask them to sign in normally, complete that website acceptance, and then select that button. Never record assent on the user's behalf. This familiar browser confirmation prevents another local application or a deceptive link from silently authorizing itself.
-3. Run the helper with `-Mode complete` after the returned polling interval. While it reports `approval_pending`, wait for that interval and try again. Stop when it expires.
-4. When it returns `authorized`, keep its one-use workspace fragment private and pass the complete `workspaceUrl` directly to `open-cogentstack-panel.ps1 -Mode Open -Url "<workspaceUrl>"`.
-5. Never print, copy, log, summarize, or persist the one-use fragment outside the helper invocation.
-6. The encrypted Claude credential is bound to the current Windows user through DPAPI. Never read, decrypt, display, or transmit it except through the bundled helpers and CogentStack's protected API flow.
+1. Extract the sole `Account-bound installation request: cgb_...` value from the user's pasted installation message. Treat it as private input. Never print, quote, summarize, log, or ask the user to reveal it again.
+2. Run the installed helper exactly once with `-Mode claim -InstallationRequest "<private cgb reference>"` from this skill's scripts directory. Do not run the legacy `start` or `complete` modes and do not open `/activate`.
+3. Require `status: connected`, `accountBound: true`, and `installationBound: true`. If the request is expired, malformed, already used, not bound to the signed-in account's current legal confirmation, or lacks an active subscription, stop and report the narrow reason without exposing the reference.
+4. The claim may explicitly replace another active ChatGPT or Claude Desktop installation for the same account. Report `replacedExistingDevice` without exposing an account identity or credential.
+5. The encrypted Claude access and renewal credentials are bound to the current Windows user through DPAPI. Never read, decrypt, display, or transmit them except through the bundled helpers and CogentStack's protected API flow.
 
 When the user explicitly asks to disconnect Claude Desktop, run `connect-cogentstack.ps1 -Mode disconnect`. It revokes the server token before deleting the Claude-specific encrypted credential.
 
@@ -59,8 +58,8 @@ When the user explicitly asks to disconnect Claude Desktop, run `connect-cogents
 After the user approves the exact project setup and target in the hosted CogentStack panel and then describes what they want built in this Claude conversation:
 
 1. Run `fulfil-project.ps1 -Mode inspect` from this skill's scripts directory.
-2. If inspection returns `desktop_authorization_required`, the approved hosted request is preserved. Do not tell the user to repeat sign-in, licence activation, Project Type selection, contract setup, directory approval, or Step 2. Run `connect-cogentstack.ps1 -Mode status` once. If it reports `connected`, retry inspection immediately. If it reports `signed_out`, run `connect-cogentstack.ps1 -Mode start` once and explain that only the private Claude Desktop connection needs confirmation on the official website. Never ask for or expose its code. The website deliberately requires a fresh Terms and EULA tick for each new Desktop connection even when the current version is already associated with the account.
-3. After starting recovery, poll with `connect-cogentstack.ps1 -Mode complete` at the returned interval. While it reports `approval_pending`, tell the user only that the existing project request remains saved and ask them to select **Continue to Claude Desktop** after the fresh legal confirmation. When it reports `authorized`, retry `fulfil-project.ps1 -Mode inspect`; do not reopen, recreate, or alter the hosted project request.
+2. If inspection returns `desktop_authorization_required`, the approved hosted request is preserved. Do not tell the user to repeat sign-in, licence activation, Project Type selection, contract setup, directory approval, Step 2, or legal acceptance. Run `connect-cogentstack.ps1 -Mode status` once. If it reports `connected`, the same installation renewed its private credential; retry inspection immediately.
+3. If status remains `signed_out`, do not run the legacy `start` or `complete` modes and do not open `/activate`. Explain whether the returned reason identifies a legacy connection, a replaced or revoked installation, an inactive subscription, or updated legal documents. Direct the user to `https://cogentstack.app/claude` only in that case. That deliberately new installation path requires a fresh tick and produces a new account-bound request; the existing approved project request remains saved and must not be recreated or altered.
 4. Use only the current authoritative request returned by CogentStack. If none exists, tell the user to complete and approve the project request in the panel. If more than one is ever returned, report a service-state error; never ask the user to choose among stale requests.
 5. Run `fulfil-project.ps1 -Mode create -RequestId <approved UUID>` for the sole current request.
 6. Keep the Desktop token, execution grant, and raw server artifact private. Never print, reproduce, cache, or infer them.

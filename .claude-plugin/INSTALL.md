@@ -12,11 +12,12 @@ CogentStack for Claude is currently a **desktop-only** integration. Claude Web w
 
 4. Install `cogentstack@cogentstack` at user scope.
 5. Reload plugins when Claude asks, or run `/reload-plugins`.
-6. Enter `$cogentstack` in a Claude Code session.
+6. Return to `https://cogentstack.app/claude`, copy the private account-bound connection request created after the fresh Terms and EULA confirmation, and paste it into the Claude Code session. Claude passes its opaque `cgb_...` value directly to the installed connection helper exactly once.
+7. Enter `$cogentstack` in a Claude Code session.
 
 Claude's native discoverable command is `/cogentstack:cogentstack`; `$cogentstack` is retained as CogentStack's common invocation across supported AI desktops.
 
-The plugin downloads its versioned instructions and Windows companion-layout helpers through Claude's marketplace. It does not require the separate CogentStack Desktop installer. On first use, Windows may ask for permission to let the helpers arrange Claude beside an existing normal Chrome or Edge CogentStack tab. The browser's own profile supplies the visible website login state; the plugin does not copy cookies or collect a CogentStack login or licence during installation. Installing the public package does not activate protected actions: CogentStack must authenticate the website account and record that account's acceptance of the current versioned Terms and EULA before it issues a Desktop credential.
+The plugin downloads its versioned instructions and Windows companion-layout helpers through Claude's marketplace. It does not require the separate CogentStack Desktop installer. On first use, Windows may ask for permission to let the helpers arrange Claude beside an existing normal Chrome or Edge CogentStack tab. The browser's own profile supplies the visible website login state; the plugin does not copy cookies or collect a CogentStack login or licence during installation. Installing the public package does not activate protected actions: the private, short-lived and single-use installation request binds the signed-in website account's exact legal confirmation to this Windows installation. Its credentials are encrypted for the current Windows user and renew only while this remains the account's active Desktop installation.
 
 ## Trust boundary
 

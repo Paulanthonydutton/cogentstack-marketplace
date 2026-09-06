@@ -1,6 +1,8 @@
 param(
-    [ValidateSet('start', 'complete', 'status', 'disconnect')]
-    [string]$Mode = 'start'
+    [ValidateSet('claim', 'start', 'complete', 'status', 'disconnect')]
+    [string]$Mode = 'start',
+
+    [string]$InstallationRequest = ''
 )
 
 Set-StrictMode -Version Latest
@@ -43,6 +45,21 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Compress | Write-Output
 }
 
+function Save-CogentStackCredential($Result) {
+    if (-not $Result.token -or -not $Result.renewalToken -or -not $Result.deviceLeaseId) {
+        throw 'CogentStack returned an incomplete account-bound Desktop credential.'
+    }
+    [ordered]@{
+        token = Protect-CogentStackValue ([string]$Result.token)
+        renewalToken = Protect-CogentStackValue ([string]$Result.renewalToken)
+        email = [string]$Result.subscriber.email
+        plan = [string]$Result.subscriber.plan
+        connectedAt = [string]$Result.createdAt
+        deviceLeaseId = [string]$Result.deviceLeaseId
+        installationBound = $true
+    } | ConvertTo-Json | Set-Content -LiteralPath $credentialPath -Encoding UTF8
+}
+
 if ($Mode -eq 'status') {
     if (Test-Path -LiteralPath $credentialPath) {
         $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
@@ -62,8 +79,46 @@ if ($Mode -eq 'status') {
         } catch {
             $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
             if ($statusCode -eq 401) {
+                $hasRenewal = $credential.PSObject.Properties.Name -contains 'renewalToken'
+                if ($hasRenewal -and $credential.renewalToken) {
+                    $renewalToken = Unprotect-CogentStackValue ([string]$credential.renewalToken)
+                    try {
+                        $renewed = Invoke-RestMethod `
+                            -Method Post `
+                            -Uri "$serviceUrl/api/device-authorization/renew" `
+                            -ContentType 'application/json' `
+                            -Headers @{ Accept = 'application/json' } `
+                            -Body (@{ renewalToken = $renewalToken } | ConvertTo-Json -Compress) `
+                            -TimeoutSec 20
+                        Save-CogentStackCredential $renewed
+                        Write-CompactJson ([ordered]@{
+                            status = 'connected'
+                            email = $renewed.subscriber.email
+                            plan = $renewed.subscriber.plan
+                            connectedAt = $renewed.createdAt
+                            renewed = $true
+                            installationBound = $true
+                        })
+                        exit 0
+                    } catch {
+                        $renewStatus = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+                        if ($renewStatus -eq 428) {
+                            Remove-Item -LiteralPath $credentialPath -Force
+                            Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'legal_update_required' })
+                            exit 0
+                        }
+                        if ($renewStatus -eq 401 -or $renewStatus -eq 403) {
+                            Remove-Item -LiteralPath $credentialPath -Force
+                            Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'installation_replaced_revoked_or_inactive' })
+                            exit 0
+                        }
+                        throw
+                    } finally {
+                        $renewalToken = $null
+                    }
+                }
                 Remove-Item -LiteralPath $credentialPath -Force
-                Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'replaced_or_revoked' })
+                Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'legacy_connection_not_bound_to_installation' })
                 exit 0
             }
             throw
@@ -98,6 +153,33 @@ if ($Mode -eq 'disconnect') {
 }
 
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+
+if ($Mode -eq 'claim') {
+    if ($InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,}$') {
+        throw 'The account-bound installation request is missing or invalid. Copy a fresh request from https://cogentstack.app/install.'
+    }
+    try {
+        $result = Invoke-RestMethod `
+            -Method Post `
+            -Uri "$serviceUrl/api/plugin/bootstrap" `
+            -ContentType 'application/json' `
+            -Headers @{ Accept = 'application/json' } `
+            -Body (@{ code = $InstallationRequest; deviceName = 'Claude Code Desktop on Windows' } | ConvertTo-Json -Compress) `
+            -TimeoutSec 20
+    } finally {
+        $InstallationRequest = ''
+    }
+    Save-CogentStackCredential $result
+    if (Test-Path -LiteralPath $pendingPath) { Remove-Item -LiteralPath $pendingPath -Force }
+    Write-CompactJson ([ordered]@{
+        status = 'connected'
+        accountBound = $true
+        installationBound = $true
+        plan = [string]$result.subscriber.plan
+        replacedExistingDevice = [bool]$result.replacedExistingDevice
+    })
+    exit 0
+}
 
 if ($Mode -eq 'start') {
     $requestBody = @{ deviceName = 'Claude Code Desktop on Windows' } | ConvertTo-Json -Compress
@@ -170,13 +252,7 @@ if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $res
     throw 'CogentStack returned an incomplete Desktop authorization.'
 }
 
-[ordered]@{
-    token = Protect-CogentStackValue ([string]$result.token)
-    email = [string]$result.subscriber.email
-    plan = [string]$result.subscriber.plan
-    connectedAt = [string]$result.createdAt
-    deviceLeaseId = [string]$result.deviceLeaseId
-} | ConvertTo-Json | Set-Content -LiteralPath $credentialPath -Encoding UTF8
+Save-CogentStackCredential $result
 Remove-Item -LiteralPath $pendingPath -Force
 
 $workspaceUrl = "$serviceUrl/stack?surface=claude-desktop#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
