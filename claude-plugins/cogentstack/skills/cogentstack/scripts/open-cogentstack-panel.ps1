@@ -1091,7 +1091,7 @@ Add-Type -AssemblyName System.Drawing
 `$panelEdge.Name = 'CogentStackPanelEdge'
 `$panelEdge.Dock = [System.Windows.Forms.DockStyle]::Right
 `$panelEdge.Width = 2
-`$panelEdge.BackColor = [System.Drawing.Color]::FromArgb(122, 137, 150)
+`$panelEdge.BackColor = [System.Drawing.Color]::FromArgb(205, 205, 205)
 `$form.Controls.Add(`$panelEdge)
 `$form.ShowInTaskbar = `$false
 `$form.ShowIcon = `$false
@@ -1292,7 +1292,7 @@ function Resume-CompanionLayout($State) {
             fastResumeAvailable = $true
             whiteDivider = [bool]$activeDivider
             dividerEdgeVisible = [bool]$activeDivider
-            dividerEdgeColor = '#7A8996'
+            dividerEdgeColor = '#CDCDCD'
             dividerMasksShadows = [bool]$activeDivider
             headerVisible = [bool]$activeHeaderVisible
             browserTopCropRemoved = $activeTopCropRemoved
@@ -1381,7 +1381,7 @@ function Resume-CompanionLayout($State) {
         gutter = $gutter
         whiteDivider = [bool]$divider
         dividerEdgeVisible = [bool]$divider
-        dividerEdgeColor = '#7A8996'
+        dividerEdgeColor = '#CDCDCD'
         dividerMasksShadows = [bool]$layout.dividerAligned
         companionExitWatcherStarted = [bool]$watcher
         shortcut = Install-WorkModeShortcut
@@ -1605,7 +1605,7 @@ if ($Mode -eq 'Inspect') {
         whiteBackdrop = [bool](Find-BackdropWindow)
         whiteDivider = [bool](Find-DividerWindow)
         dividerEdgeVisible = [bool](Find-DividerWindow)
-        dividerEdgeColor = '#7A8996'
+        dividerEdgeColor = '#CDCDCD'
         dividerMasksShadows = [bool](Find-DividerWindow)
     })
     exit 0
@@ -1863,7 +1863,7 @@ Write-CompactJson ([ordered]@{
     whiteBackdrop = $true
     whiteDivider = [bool]$divider
     dividerEdgeVisible = [bool]$divider
-    dividerEdgeColor = '#7A8996'
+    dividerEdgeColor = '#CDCDCD'
     dividerMasksShadows = [bool]$layout.dividerAligned
     browserContentMode = 'page-only'
     browserChromeHidden = $true
