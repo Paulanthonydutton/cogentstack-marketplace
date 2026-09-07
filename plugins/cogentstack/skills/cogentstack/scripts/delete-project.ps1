@@ -89,7 +89,7 @@ function Resolve-ApprovedDeletionTarget(
     ) {
         throw 'The approved project target is not the exact registered child of its work directory.'
     }
-    if ($targetFull.Replace('/', '\').Split('\') | Where-Object { $_.ToLowerInvariant() -eq '.tmp' }) {
+    if ($targetFull.Replace('/', '\').Split('\') | Where-Object { [string]::Equals($_, '.tmp', [StringComparison]::OrdinalIgnoreCase) }) {
         throw 'Temporary validation projects cannot be deleted through the project library.'
     }
 

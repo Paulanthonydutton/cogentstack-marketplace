@@ -1,6 +1,6 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260907085107",
+  "version": "0.4.0+codex.20260907101239",
   "description": "Reuse one signed-in CogentStack browser workspace as a page-only 50/50 companion, remember verified project previews, optionally use an isolated in-Codex panel, and execute approved project actions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",

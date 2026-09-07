@@ -65,8 +65,32 @@ if (JSON.stringify(actualScripts) !== JSON.stringify([...requiredScripts].sort()
 }
 
 const deletionSource = await readFile(join(scriptsRoot, "delete-project.ps1"), "utf8");
-if (!deletionSource.includes("$_.ToLowerInvariant() -eq '.tmp'")) fail("deletion helper must use the .NET invariant lowercase method");
+if (!deletionSource.includes("[string]::Equals($_, '.tmp', [StringComparison]::OrdinalIgnoreCase)")) {
+  fail("deletion helper must compare temporary path segments with the .NET ordinal ignore-case API");
+}
 if (deletionSource.includes("ToLocaleLowerInvariant")) fail("deletion helper contains a JavaScript-only string method");
+
+const deletionFunctionStart = deletionSource.indexOf("function Resolve-ApprovedDeletionTarget(");
+const deletionFunctionEnd = deletionSource.indexOf("\nfunction Get-DecodedProcessCommand", deletionFunctionStart);
+if (deletionFunctionStart < 0 || deletionFunctionEnd < 0) fail("deletion target validator function could not be isolated");
+const deletionRuntimeCheck = spawnSync("powershell.exe", [
+  "-NoProfile",
+  "-Command",
+  `& {
+${deletionSource.slice(deletionFunctionStart, deletionFunctionEnd)}
+$valid = Resolve-ApprovedDeletionTarget 'C:\\CogentStack\\projects\\sample' 'C:\\CogentStack\\projects' 'sample'
+if ($valid -ne 'C:\\CogentStack\\projects\\sample') { throw 'A valid project path was not accepted.' }
+try {
+  Resolve-ApprovedDeletionTarget 'C:\\CogentStack\\projects\\.TMP' 'C:\\CogentStack\\projects' '.TMP' | Out-Null
+  throw 'A temporary project path was accepted.'
+} catch {
+  if ($_.Exception.Message -ne 'Temporary validation projects cannot be deleted through the project library.') { throw }
+}
+}`,
+], { encoding: "utf8" });
+if (deletionRuntimeCheck.status !== 0) {
+  fail(`deletion target validator failed at runtime: ${(deletionRuntimeCheck.stderr || deletionRuntimeCheck.stdout).trim()}`);
+}
 
 const ensureSource = await readFile(join(scriptsRoot, "ensure-cogentstack.ps1"), "utf8");
 if (!ensureSource.includes("https://cogentstack.app/stack?surface=claude-desktop")) fail("readiness helper does not use the Claude Desktop surface");
