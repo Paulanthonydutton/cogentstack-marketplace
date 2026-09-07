@@ -558,62 +558,49 @@ function Test-CogentStackTerminalInstallAddress([string]$Address) {
 function Select-BrowserTabCandidate($Candidate) {
     if (-not $Candidate) { return $false }
     if (-not $Candidate.PSObject.Properties['Tab'] -or -not $Candidate.Tab) { return $true }
+    if ($Candidate.PSObject.Properties['IsSelected'] -and [bool]$Candidate.IsSelected) { return $true }
     try {
         $selectionPattern = $null
         if (-not $Candidate.Tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) { return $false }
         ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Select()
         Start-Sleep -Milliseconds 350
+        if ($Candidate.PSObject.Properties['IsSelected']) { $Candidate.IsSelected = $true }
+        if ($Candidate.PSObject.Properties['Activated']) { $Candidate.Activated = $true }
         return $true
     } catch {
         return $false
     }
 }
 
-function Close-SelectedBrowserTab($Window) {
-    [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Window.Handle, 9) | Out-Null
-    [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$Window.Handle) | Out-Null
-    [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$Window.Handle) | Out-Null
-    [CogentStackWorkspaceWindows]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero)
-    [CogentStackWorkspaceWindows]::keybd_event(0x57, 0, 0, [UIntPtr]::Zero)
-    [CogentStackWorkspaceWindows]::keybd_event(0x57, 0, 2, [UIntPtr]::Zero)
-    [CogentStackWorkspaceWindows]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
+function Restore-BrowserTabSelection($Tab) {
+    if (-not $Tab) { return }
+    try {
+        $selectionPattern = $null
+        if ($Tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) {
+            ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Select()
+            Start-Sleep -Milliseconds 150
+        }
+    } catch {}
 }
 
-function Remove-TerminalCogentStackInstallationTabs($Browsers) {
-    $removed = 0
-    foreach ($candidateBrowser in $Browsers) {
-        $browserWindows = @(Get-DesktopWindows | Where-Object { $_.ProcessName -eq $candidateBrowser.ProcessName })
-        foreach ($browserWindow in $browserWindows) {
-            for ($pass = 0; $pass -lt 12; $pass++) {
-                $closedOne = $false
-                try {
-                    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$browserWindow.Handle)
-                    $tabCondition = New-Object System.Windows.Automation.PropertyCondition(
-                        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-                        [System.Windows.Automation.ControlType]::TabItem
-                    )
-                    $tabs = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCondition)
-                    # Never close the browser window by removing its sole remaining tab.
-                    if ($tabs.Count -le 1) { break }
-                    foreach ($tab in $tabs) {
-                        if ([string]$tab.Current.Name -notmatch '(?i)CogentStack') { continue }
-                        $selectionPattern = $null
-                        if (-not $tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) { continue }
-                        ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Select()
-                        Start-Sleep -Milliseconds 250
-                        if (-not (Test-CogentStackTerminalInstallAddress (Get-BrowserAddressValue $browserWindow))) { continue }
-                        Close-SelectedBrowserTab $browserWindow
-                        $removed++
-                        $closedOne = $true
-                        Start-Sleep -Milliseconds 350
-                        break
-                    }
-                } catch {}
-                if (-not $closedOne) { break }
-            }
+function Confirm-BrowserTabCandidate($Candidate) {
+    if (-not $Candidate) { return $false }
+    if (-not (Select-BrowserTabCandidate $Candidate)) { return $false }
+    $addressValue = Get-BrowserAddressValue $Candidate.Window
+    $addressMatches = (
+        ([bool]$Candidate.IsWorkspace -and (Test-CogentStackWorkspaceAddress $addressValue)) -or
+        ([bool]$Candidate.IsHome -and (Test-CogentStackHomeAddress $addressValue))
+    )
+    if (-not $addressMatches) {
+        if ($Candidate.PSObject.Properties['OriginalSelectedTab'] -and $Candidate.OriginalSelectedTab -and
+            (-not $Candidate.PSObject.Properties['Tab'] -or $Candidate.OriginalSelectedTab -ne $Candidate.Tab)) {
+            Restore-BrowserTabSelection $Candidate.OriginalSelectedTab
         }
+        return $false
     }
-    return $removed
+    $Candidate.Address = $addressValue
+    $Candidate.AccountState = Wait-AccountState $Candidate.Window 8
+    return $true
 }
 
 function Set-BrowserWorkspaceAddress($Window, [string]$TargetUrl) {
@@ -676,22 +663,11 @@ function Test-CompanionOwnedAddress([string]$Address) {
 
 function Select-RememberedCogentStackWorkspaceTab($Window) {
     if (Test-CogentStackWorkspaceAddress (Get-BrowserAddressValue $Window)) { return $true }
-    try {
-        $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
-        $tabCondition = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            [System.Windows.Automation.ControlType]::TabItem
-        )
-        foreach ($tab in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCondition)) {
-            if (-not (Test-CogentStackWorkspaceTitle ([string]$tab.Current.Name))) { continue }
-            $selectionPattern = $null
-            if (-not $tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) { continue }
-            ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Select()
-            Start-Sleep -Milliseconds 250
-            if (Test-CogentStackWorkspaceAddress (Get-BrowserAddressValue $Window)) { return $true }
-        }
-    } catch {}
-    return $false
+    $workspaceCandidates = @(Get-CogentStackTabCandidates $Window $null | Where-Object { $_.IsWorkspace })
+    $candidate = @($workspaceCandidates | Where-Object { $_.IsSelected } | Select-Object -First 1)
+    if (-not $candidate) { $candidate = @($workspaceCandidates | Select-Object -First 1) }
+    if (-not $candidate) { return $false }
+    return Confirm-BrowserTabCandidate $candidate
 }
 
 function Get-WebDocumentRectangle($Window) {
@@ -898,7 +874,7 @@ function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [In
     }
 }
 
-function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
+function Get-CogentStackTabCandidates($Window, $Browser) {
     $results = @()
     try {
         $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
@@ -907,41 +883,41 @@ function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
             [System.Windows.Automation.ControlType]::TabItem
         )
         $tabs = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCondition)
+        $originalSelectedTab = $null
+        foreach ($tab in $tabs) {
+            try {
+                $selectionPattern = $null
+                if ($tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern) -and
+                    ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Current.IsSelected) {
+                    $originalSelectedTab = $tab
+                    break
+                }
+            } catch {}
+        }
         foreach ($tab in $tabs) {
             $tabName = [string]$tab.Current.Name
             $isWorkspaceTitle = Test-CogentStackWorkspaceTitle $tabName
             $isHomeTitle = $tabName -match '(?i)^CogentStack \| AI Production Stack(?:\s+-\s+Memory usage.*)?$'
-            $isTerminalInstallTitle = $tabName -match '(?i)^(?:Completed|Replaced) installation \| CogentStack(?:\s+-\s+Memory usage.*)?$'
-            if (-not $isWorkspaceTitle -and -not $isHomeTitle -and -not $isTerminalInstallTitle -and $tabName -notmatch '(?i)CogentStack') { continue }
-            $accountState = 'unknown'
-            $addressValue = ''
-            $selected = -not $SelectTabs
-            if ($SelectTabs) {
+            if (-not $isWorkspaceTitle -and -not $isHomeTitle) { continue }
+            $isSelected = $false
+            try {
                 $selectionPattern = $null
                 if ($tab.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionPattern)) {
-                    ([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Select()
-                    Start-Sleep -Milliseconds 500
-                    $selected = $true
-                    $addressValue = Get-BrowserAddressValue $Window
-                    $accountState = Wait-AccountState $Window 8
+                    $isSelected = [bool]([System.Windows.Automation.SelectionItemPattern]$selectionPattern).Current.IsSelected
                 }
-            }
-            if (-not $selected) { continue }
-            $isCogentStackAddress = Test-CogentStackAddress $addressValue
-            if ($SelectTabs -and -not $isCogentStackAddress -and -not $isWorkspaceTitle -and -not $isHomeTitle) { continue }
-            $isWorkspace = $isWorkspaceTitle -or (Test-CogentStackWorkspaceAddress $addressValue)
-            $isHome = $isHomeTitle -or (Test-CogentStackHomeAddress $addressValue)
-            $isTerminalInstall = $isTerminalInstallTitle -or (Test-CogentStackTerminalInstallAddress $addressValue)
-            if (-not $isWorkspace -and -not $isHome -and -not $isTerminalInstall) { continue }
+            } catch {}
             $results += [pscustomobject]@{
                 Window = $Window
                 Browser = $Browser
                 Tab = $tab
-                AccountState = $accountState
-                Address = $addressValue
-                IsWorkspace = $isWorkspace
-                IsHome = $isHome
-                IsTerminalInstall = $isTerminalInstall
+                TabName = $tabName
+                OriginalSelectedTab = $originalSelectedTab
+                IsSelected = $isSelected
+                Activated = $false
+                AccountState = 'unknown'
+                Address = ''
+                IsWorkspace = $isWorkspaceTitle
+                IsHome = $isHomeTitle
                 ReusedExistingTab = $true
                 HasTabStrip = $true
             }
@@ -950,11 +926,15 @@ function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
             $results += [pscustomobject]@{
                 Window = $Window
                 Browser = $Browser
-                AccountState = if ($SelectTabs) { Wait-AccountState $Window 8 } else { 'unknown' }
-                Address = if ($SelectTabs) { Get-BrowserAddressValue $Window } else { '' }
+                Tab = $null
+                TabName = [string]$Window.Title
+                OriginalSelectedTab = $originalSelectedTab
+                IsSelected = $true
+                Activated = $false
+                AccountState = 'unknown'
+                Address = ''
                 IsWorkspace = $true
                 IsHome = $false
-                IsTerminalInstall = $false
                 ReusedExistingTab = $true
                 HasTabStrip = $tabs.Count -gt 0
             }
@@ -964,11 +944,15 @@ function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
             $results += [pscustomobject]@{
                 Window = $Window
                 Browser = $Browser
+                Tab = $null
+                TabName = [string]$Window.Title
+                OriginalSelectedTab = $null
+                IsSelected = $true
+                Activated = $false
                 AccountState = 'unknown'
                 Address = ''
                 IsWorkspace = $true
                 IsHome = $false
-                IsTerminalInstall = $false
                 ReusedExistingTab = $true
                 HasTabStrip = $false
             }
@@ -977,25 +961,23 @@ function Get-CogentStackTabCandidates($Window, $Browser, [bool]$SelectTabs) {
     @($results)
 }
 
-function Find-ExistingCogentStackWindow($Browsers, [bool]$SelectTabs) {
+function Find-ExistingCogentStackWindow($Browsers) {
     $candidates = @()
     $desktopWindows = @(Get-DesktopWindows)
     foreach ($candidateBrowser in $Browsers) {
         foreach ($browserWindow in @($desktopWindows | Where-Object { $_.ProcessName -eq $candidateBrowser.ProcessName })) {
-            $candidates += @(Get-CogentStackTabCandidates $browserWindow $candidateBrowser $SelectTabs)
+            $candidates += @(Get-CogentStackTabCandidates $browserWindow $candidateBrowser)
         }
     }
-    $signedInWorkspace = @($candidates | Where-Object { $_.AccountState -eq 'signed_in' -and $_.IsWorkspace } | Select-Object -First 1)
-    if ($signedInWorkspace) { return $signedInWorkspace }
-    $signedInHome = @($candidates | Where-Object { $_.AccountState -eq 'signed_in' -and $_.IsHome } | Select-Object -First 1)
-    if ($signedInHome) { return $signedInHome }
-    $workspaceWindow = @($candidates | Where-Object { $_.IsWorkspace -and $_.HasTabStrip } | Select-Object -First 1)
+    $selectedWorkspace = @($candidates | Where-Object { $_.IsWorkspace -and $_.IsSelected } | Select-Object -First 1)
+    if ($selectedWorkspace) { return $selectedWorkspace }
+    $workspaceWindow = @($candidates | Where-Object { $_.IsWorkspace } | Select-Object -First 1)
     if ($workspaceWindow) { return $workspaceWindow }
-    $homeWindow = @($candidates | Where-Object { $_.IsHome -and $_.HasTabStrip } | Select-Object -First 1)
+    $selectedHome = @($candidates | Where-Object { $_.IsHome -and $_.IsSelected } | Select-Object -First 1)
+    if ($selectedHome) { return $selectedHome }
+    $homeWindow = @($candidates | Where-Object { $_.IsHome } | Select-Object -First 1)
     if ($homeWindow) { return $homeWindow }
-    $terminalInstall = @($candidates | Where-Object { $_.IsTerminalInstall -and $_.HasTabStrip } | Select-Object -First 1)
-    if ($terminalInstall) { return $terminalInstall }
-    @($candidates | Select-Object -First 1)
+    return $null
 }
 
 function Find-BackdropWindow {
@@ -1320,7 +1302,8 @@ function Resume-CompanionLayout($State) {
         return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false }
     }
     if (-not (Select-RememberedCogentStackWorkspaceTab $panelWindow)) {
-        return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false; reason = 'remembered_workspace_tab_unavailable' }
+        $restore = Restore-CompanionLayout $State $false $true $true
+        return [ordered]@{ status = 'cold_start_required'; resumed = $false; fastResumeAvailable = $false; reason = 'remembered_workspace_tab_unavailable'; browserWindowRestored = [bool]$restore.browserWindowRestored }
     }
     $workspaceUrl = if ($State.PSObject.Properties['workspaceUrl']) { [string]$State.workspaceUrl } else { 'https://cogentstack.app/stack?surface=chatgpt' }
     $panelAddress = Get-BrowserAddressValue $panelWindow
@@ -1702,7 +1685,7 @@ if ($Mode -eq 'WatchExit') {
 }
 
 if ($Mode -eq 'Inspect') {
-    $existingPanel = @(Find-ExistingCogentStackWindow $browsers $false | Select-Object -First 1)
+    $existingPanel = @(Find-ExistingCogentStackWindow $browsers | Select-Object -First 1)
     Write-CompactJson ([ordered]@{
         status = 'inspected'
         platform = 'windows'
@@ -1768,35 +1751,59 @@ if ($browsers.Count -eq 0) {
 
 $openMutex = Enter-CompanionOpenMutex
 try {
-    # Re-scan only after taking the shared launch lock. Concurrent invocations
-    # therefore observe the tab opened by the first process instead of racing
-    # into additional browser tabs.
-    $panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
-    $retiredCompletedInstallTabs = 0
-    if ($panelSelection -and -not [bool]$panelSelection.IsTerminalInstall) {
-        $retiredCompletedInstallTabs = Remove-TerminalCogentStackInstallationTabs $browsers
-        if ($retiredCompletedInstallTabs -gt 0) {
-            $panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
+    # The remembered verified workspace is authoritative. Reusing it avoids any
+    # browser-wide discovery and does not touch other browser tabs.
+    if ($state) {
+        $rememberedPanelBeforeResume = Find-RememberedWindow $state 'panel'
+        $rememberedWorkspaceAlreadySelected = [bool]($rememberedPanelBeforeResume -and (Test-CogentStackWorkspaceAddress (Get-BrowserAddressValue $rememberedPanelBeforeResume)))
+        $rememberedResume = Resume-CompanionLayout $state
+        if ([string]$rememberedResume.status -in @('already_active', 'resumed')) {
+            $rememberedPanel = Find-RememberedWindow $state 'panel'
+            $rememberedResume['browser'] = if ($state.PSObject.Properties['browser']) { [string]$state.browser } else { $null }
+            $rememberedResume['accountState'] = if ($rememberedPanel) { Wait-AccountState $rememberedPanel 8 } else { 'unknown' }
+            $rememberedResume['reusedExistingTab'] = $true
+            $rememberedResume['reusedExistingHomeTab'] = $false
+            $rememberedResume['openedNewTab'] = $false
+            $rememberedResume['tabResolution'] = 'remembered-workspace'
+            $rememberedResume['candidateTabsActivated'] = if ($rememberedWorkspaceAlreadySelected) { 0 } else { 1 }
+            Write-CompactJson $rememberedResume
+            exit 0
         }
+        if ([string]$rememberedResume.status -ne 'cold_start_required') {
+            $rememberedResume['reusedExistingTab'] = $true
+            $rememberedResume['openedNewTab'] = $false
+            $rememberedResume['tabResolution'] = 'remembered-workspace'
+            $rememberedResume['candidateTabsActivated'] = if ($rememberedWorkspaceAlreadySelected) { 0 } else { 1 }
+            Write-CompactJson $rememberedResume
+            exit 0
+        }
+        $state = $null
     }
+
+    # Cold discovery inventories exact workspace/home titles without selecting
+    # anything. Only the single chosen candidate is then activated and its URL
+    # is verified. A mismatch fails closed and restores the original tab.
+    $panelSelection = Find-ExistingCogentStackWindow $browsers | Select-Object -First 1
     $reusedExistingTab = [bool]$panelSelection
     $reusedExistingHomeTab = $false
-    $reusedTerminalInstallTab = $false
     $openedNewTab = $false
+    $tabResolution = if ($panelSelection) { 'exact-title-inventory' } else { 'new-tab' }
+    $candidateTabsActivated = 0
     if ($panelSelection) {
-        if (-not (Select-BrowserTabCandidate $panelSelection)) {
+        if (-not (Confirm-BrowserTabCandidate $panelSelection)) {
             Write-CompactJson ([ordered]@{
                 status = 'opened_unarranged'
-                message = 'An existing CogentStack tab was found, but Windows could not select it safely.'
+                message = 'An exact CogentStack tab title was found, but its address did not verify as the CogentStack workspace or home page. The original browser tab was restored and no new tab was opened.'
                 browser = [string]$panelSelection.Browser.Name
                 reusedExistingTab = $true
                 openedNewTab = $false
-                retiredCompletedInstallTabs = $retiredCompletedInstallTabs
+                tabResolution = $tabResolution
+                candidateTabsActivated = if ([bool]$panelSelection.Activated) { 1 } else { 0 }
             })
             exit 0
         }
+        $candidateTabsActivated = if ([bool]$panelSelection.Activated) { 1 } else { 0 }
         $reusedExistingHomeTab = [bool]$panelSelection.IsHome
-        $reusedTerminalInstallTab = [bool]$panelSelection.IsTerminalInstall
         if (-not [bool]$panelSelection.IsWorkspace) {
             if (-not (Set-BrowserWorkspaceAddress $panelSelection.Window $safeUrl)) {
                 Write-CompactJson ([ordered]@{
@@ -1805,10 +1812,10 @@ try {
                     browser = [string]$panelSelection.Browser.Name
                     reusedExistingTab = $true
                     reusedExistingHomeTab = $reusedExistingHomeTab
-                    reusedTerminalInstallTab = $reusedTerminalInstallTab
                     openedNewTab = $false
-                    retiredCompletedInstallTabs = $retiredCompletedInstallTabs
                     accountState = [string]$panelSelection.AccountState
+                    tabResolution = $tabResolution
+                    candidateTabsActivated = $candidateTabsActivated
                 })
                 exit 0
             }
@@ -1822,8 +1829,21 @@ try {
         $openedNewTab = $true
         for ($attempt = 0; $attempt -lt 40 -and -not $panelSelection; $attempt++) {
             Start-Sleep -Milliseconds 250
-            $panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
+            $panelSelection = Find-ExistingCogentStackWindow $browsers | Select-Object -First 1
         }
+        if ($panelSelection -and -not (Confirm-BrowserTabCandidate $panelSelection)) {
+            Write-CompactJson ([ordered]@{
+                status = 'opened_unarranged'
+                message = 'The newly opened CogentStack tab did not verify as the requested workspace.'
+                browser = [string]$panelSelection.Browser.Name
+                reusedExistingTab = $false
+                openedNewTab = $true
+                tabResolution = $tabResolution
+                candidateTabsActivated = if ([bool]$panelSelection.Activated) { 1 } else { 0 }
+            })
+            exit 0
+        }
+        if ($panelSelection) { $candidateTabsActivated = if ([bool]$panelSelection.Activated) { 1 } else { 0 } }
     }
 } finally {
     Exit-CompanionOpenMutex $openMutex
@@ -1941,9 +1961,9 @@ $layoutState = [ordered]@{
     browser = [string]$browser.Name
     reusedExistingTab = $reusedExistingTab
     reusedExistingHomeTab = $reusedExistingHomeTab
-    reusedTerminalInstallTab = $reusedTerminalInstallTab
     openedNewTab = $openedNewTab
-    retiredCompletedInstallTabs = $retiredCompletedInstallTabs
+    tabResolution = $tabResolution
+    candidateTabsActivated = $candidateTabsActivated
     browserContentMode = 'page-only'
     browserContentClipped = [bool]$pageOnly.contentClipped
     browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
@@ -2005,9 +2025,9 @@ Write-CompactJson ([ordered]@{
     registeredDefault = [bool]$browser.IsRegisteredDefault
     reusedExistingTab = $reusedExistingTab
     reusedExistingHomeTab = $reusedExistingHomeTab
-    reusedTerminalInstallTab = $reusedTerminalInstallTab
     openedNewTab = $openedNewTab
-    retiredCompletedInstallTabs = $retiredCompletedInstallTabs
+    tabResolution = $tabResolution
+    candidateTabsActivated = $candidateTabsActivated
     accountState = [string]$panelSelection.AccountState
     chatFrame = $layout.chat
     panelFrame = $layout.panel

@@ -160,10 +160,11 @@ for (const marker of [
   "opened_unarranged",
   "accountState",
   "layoutVerified",
-  "Test-CogentStackTerminalInstallAddress",
-  "Remove-TerminalCogentStackInstallationTabs",
-  "Select-BrowserTabCandidate $panelSelection",
-  "retiredCompletedInstallTabs",
+  "function Confirm-BrowserTabCandidate",
+  "Restore-BrowserTabSelection $Candidate.OriginalSelectedTab",
+  "Confirm-BrowserTabCandidate $panelSelection",
+  "$rememberedResume['tabResolution'] = 'remembered-workspace'",
+  "candidateTabsActivated",
 ]) {
   if (!panelSource.includes(marker)) fail(`companion helper is missing required marker: ${marker}`);
 }
@@ -187,13 +188,14 @@ const validateExistingTabReuse = (source, label) => {
     "CogentStack \\| AI Production Stack",
     "$reusedExistingTab = [bool]$panelSelection",
     "$reusedExistingHomeTab = [bool]$panelSelection.IsHome",
-    "$signedInHome",
+    "$selectedWorkspace",
+    "$selectedHome",
     "$homeWindow",
-    "if (-not $isWorkspace -and -not $isHome -and -not $isTerminalInstall)",
+    "if (-not $isWorkspaceTitle -and -not $isHomeTitle) { continue }",
     "if (-not [bool]$panelSelection.IsWorkspace)",
     "reusedExistingHomeTab = $reusedExistingHomeTab",
-    "reusedTerminalInstallTab = $reusedTerminalInstallTab",
-    "retiredCompletedInstallTabs = $retiredCompletedInstallTabs",
+    "tabResolution = $tabResolution",
+    "candidateTabsActivated = $candidateTabsActivated",
   ]) {
     if (!source.includes(marker)) fail(`${label} helper is missing existing-tab reuse marker: ${marker}`);
   }
@@ -202,12 +204,21 @@ const validateExistingTabReuse = (source, label) => {
   }
   const selectionIndex = source.indexOf("$panelSelection = Find-ExistingCogentStackWindow");
   const mutexIndex = source.indexOf("$openMutex = Enter-CompanionOpenMutex");
+  const rememberedIndex = source.indexOf("$rememberedResume = Resume-CompanionLayout $state", mutexIndex);
   const reuseIndex = source.indexOf("if ($panelSelection)", selectionIndex);
   const newTabIndex = source.indexOf("Start-Process -FilePath $preferredBrowser.ExecutablePath", selectionIndex);
   const mutexReleaseIndex = source.indexOf("Exit-CompanionOpenMutex $openMutex", newTabIndex);
-  if (mutexIndex < 0 || mutexIndex >= selectionIndex || selectionIndex < 0 || reuseIndex < selectionIndex || newTabIndex < reuseIndex || mutexReleaseIndex < newTabIndex) {
+  if (mutexIndex < 0 || rememberedIndex <= mutexIndex || rememberedIndex >= selectionIndex || selectionIndex < 0 || reuseIndex < selectionIndex || newTabIndex < reuseIndex || mutexReleaseIndex < newTabIndex) {
     fail(`${label} helper must reuse and navigate an existing CogentStack tab before opening a new tab`);
   }
+  const inventoryStart = source.indexOf("function Get-CogentStackTabCandidates");
+  const inventoryEnd = source.indexOf("function Find-ExistingCogentStackWindow", inventoryStart);
+  if (inventoryStart < 0 || inventoryEnd <= inventoryStart) fail(`${label} helper is missing the non-activating exact-title inventory`);
+  const inventory = source.slice(inventoryStart, inventoryEnd);
+  if (inventory.includes(".Select()")) fail(`${label} helper activates tabs while inventorying them`);
+  if (inventory.includes("Wait-AccountState") || inventory.includes("Get-BrowserAddressValue")) fail(`${label} helper reads active-tab state while inventorying titles`);
+  if (source.includes("$tabName -notmatch '(?i)CogentStack'")) fail(`${label} helper still accepts generic CogentStack title substrings`);
+  if (source.includes("Remove-TerminalCogentStackInstallationTabs")) fail(`${label} helper still cycles through installation tabs during normal launch`);
 };
 
 validateExistingTabReuse(panelSource, "Claude");
