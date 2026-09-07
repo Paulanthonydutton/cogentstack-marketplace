@@ -332,15 +332,19 @@ function Clear-WindowRegion($Window) {
     }
 }
 
-function Set-WindowContentRegion($Window, $DocumentRectangle) {
+function Set-WindowContentRegion($Window, $DocumentRectangle, [bool]$PreserveOffscreenTop = $false) {
     $windowRectangle = Get-WindowRectangle $Window.Handle
     if (-not $windowRectangle) { throw 'Windows could not measure the browser before applying its content crop.' }
 
     $left = [int]$DocumentRectangle.x - [int]$windowRectangle.x
-    $top = [int]$DocumentRectangle.y - [int]$windowRectangle.y
+    $documentTop = [int]$DocumentRectangle.y - [int]$windowRectangle.y
+    # Browser controls are already positioned above the monitor. Keeping the
+    # region's top at the real window top prevents a later Chrome accessibility
+    # reflow from clipping the CogentStack banner and its exit control.
+    $top = if ($PreserveOffscreenTop) { 0 } else { $documentTop }
     $right = $left + [int]$DocumentRectangle.width
-    $bottom = $top + [int]$DocumentRectangle.height
-    if ($left -lt 0 -or $top -lt 0 -or $right -gt [int]$windowRectangle.width -or $bottom -gt [int]$windowRectangle.height) {
+    $bottom = $documentTop + [int]$DocumentRectangle.height
+    if ($documentTop -lt 0 -or $left -lt 0 -or $top -lt 0 -or $right -le $left -or $bottom -le $top -or $right -gt [int]$windowRectangle.width -or $bottom -gt [int]$windowRectangle.height) {
         throw 'The browser reported document bounds outside its window; the browser crop was not applied.'
     }
 
@@ -626,10 +630,9 @@ function Test-CompanionResumeAddress([string]$Address) {
 }
 
 function Test-CompanionProjectDeletionAddress([string]$Address) {
-    if (-not (Test-CogentStackAddress $Address)) { return $false }
-    $parsed = $null
-    if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$parsed)) { return $false }
-    return $parsed.AbsolutePath.TrimEnd('/') -eq '/stack' -and
+    $parsed = ConvertTo-CogentStackUri $Address
+    return $null -ne $parsed -and
+        $parsed.AbsolutePath.TrimEnd('/') -eq '/stack' -and
         $parsed.Query -match '(?i)(?:^|[?&])desktop_action=delete_project(?:&|$)'
 }
 
@@ -679,6 +682,46 @@ function Get-WebDocumentRectangle($Window) {
         }
     } catch {}
     return $null
+}
+
+function Get-CogentStackHeaderAnchorRectangle($Window) {
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
+        $nameCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'CogentStack home'
+        )
+        $anchors = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $nameCondition)
+        foreach ($anchor in $anchors) {
+            if ($anchor.Current.ControlType -ne [System.Windows.Automation.ControlType]::Hyperlink) { continue }
+            $rectangle = $anchor.Current.BoundingRectangle
+            if ($rectangle.Width -le 0 -or $rectangle.Height -le 0) { continue }
+            return [ordered]@{
+                x = [int][Math]::Round($rectangle.X)
+                y = [int][Math]::Round($rectangle.Y)
+                width = [int][Math]::Round($rectangle.Width)
+                height = [int][Math]::Round($rectangle.Height)
+                offscreen = [bool]$anchor.Current.IsOffscreen
+            }
+        }
+    } catch {}
+    return $null
+}
+
+function Test-CogentStackHeaderVisible($Window, $Area) {
+    $anchor = Get-CogentStackHeaderAnchorRectangle $Window
+    if (-not $anchor -or $anchor.offscreen) { return $false }
+    $anchorBottom = [int]$anchor.y + [int]$anchor.height
+    $headerBandBottom = [int]$Area.y + [Math]::Min(180, [int]$Area.height)
+    return [int]$anchor.y -ge [int]$Area.y -and $anchorBottom -le $headerBandBottom
+}
+
+function Wait-CogentStackHeaderVisible($Window, $Area, [int]$Attempts = 30) {
+    for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
+        if (Test-CogentStackHeaderVisible $Window $Area) { return $true }
+        Start-Sleep -Milliseconds 100
+    }
+    return Test-CogentStackHeaderVisible $Window $Area
 }
 
 function Wait-WebDocumentRectangle($Window, [scriptblock]$Accept, [int]$Attempts = 30) {
@@ -748,7 +791,12 @@ function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [In
     }
 
     $leftInset = [Math]::Max(0, [int]$documentProbe.x - [int]$visibleProbe.x)
-    $topInset = [Math]::Max(0, [int]$documentProbe.y - [int]$visibleProbe.y)
+    $measuredTopInset = [Math]::Max(0, [int]$documentProbe.y - [int]$visibleProbe.y)
+    # The UI Automation document can briefly resolve to the workspace scroll
+    # region below the CogentStack header. Preserve the browser-chrome height
+    # measured before removing the frame so that transient result cannot crop
+    # the banner out of the page-only panel.
+    $topInset = if ($normalChromeHeight -gt 0) { $normalChromeHeight } else { $measuredTopInset }
     $rightInset = [Math]::Max(0, ([int]$visibleProbe.x + [int]$visibleProbe.width) - ([int]$documentProbe.x + [int]$documentProbe.width))
     $bottomInset = [Math]::Max(0, ([int]$visibleProbe.y + [int]$visibleProbe.height) - ([int]$documentProbe.y + [int]$documentProbe.height))
 
@@ -800,12 +848,13 @@ function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [In
     if ([int]$documentFinal.x -ne $PanelX -or [int]$documentFinal.y -ne [int]$Area.y -or [int]$documentFinal.width -ne $PanelWidth -or [int]$documentFinal.height -ne [int]$Area.height) {
         throw 'The browser did not converge on the exact CogentStack page-only bounds.'
     }
-    $clipInsets = Set-WindowContentRegion $Window $documentFinal
+    $clipInsets = Set-WindowContentRegion $Window $documentFinal $true
     [ordered]@{
         originalStyle = $OriginalStyle
         appliedStyle = $borderlessStyle
         chromeInsets = [ordered]@{ left = $leftInset; top = $topInset; right = $rightInset; bottom = $bottomInset }
         clipInsets = $clipInsets
+        topCropRemoved = [bool]($clipInsets.top -eq 0)
         contentClipped = $true
         contentFrame = $documentFinal
         windowFrame = Get-VisibleWindowRectangle $Window.Handle
@@ -976,26 +1025,28 @@ function Get-WhiteDividerArea($Area, [int]$LeftWidth, [int]$Gutter) {
     }
 }
 
-function Set-WhiteDividerLayer($Divider) {
+function Set-WhiteDividerLayer($Divider, $PanelWindow) {
     if (-not $Divider -or -not [CogentStackClaudeWorkspaceWindows]::IsWindow([IntPtr]$Divider.Handle)) {
         throw 'The white CogentStack divider is unavailable.'
     }
     [CogentStackClaudeWorkspaceWindows]::ShowWindow([IntPtr]$Divider.Handle, 5) | Out-Null
-    # Keep the divider in the ordinary desktop z-order. HWND_TOPMOST made the
-    # narrow mask survive above a maximized browser and visibly cut through
-    # Chrome's tabs, controls, and document whenever the split was disturbed.
-    $demoted = [CogentStackClaudeWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr](-2), 0, 0, 0, 0, 0x0013)
-    $raised = [CogentStackClaudeWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013)
-    if (-not $demoted -or -not $raised) {
-        throw 'Windows could not place the white CogentStack divider in the panel z-order.'
+    if (-not $PanelWindow -or -not [CogentStackClaudeWorkspaceWindows]::IsWindow([IntPtr]$PanelWindow.Handle)) {
+        throw 'The CogentStack panel is unavailable for divider placement.'
+    }
+    # Anchor the passive divider immediately behind the CogentStack browser.
+    # It remains visible in the empty gutter, including while a capture tool
+    # has focus, while any window above the panel covers it naturally.
+    $anchored = [CogentStackClaudeWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle, 0, 0, 0, 0, 0x0013)
+    if (-not $anchored) {
+        throw 'Windows could not anchor the CogentStack divider behind the panel.'
     }
 }
 
-function Start-WhiteDivider($Area) {
+function Start-WhiteDivider($Area, $PanelWindow) {
     $existing = @(Find-DividerWindow | Select-Object -First 1)
     if ($existing) {
         Move-DesktopWindow $existing ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
-        Set-WhiteDividerLayer $existing
+        Set-WhiteDividerLayer $existing $PanelWindow
         return $existing
     }
 
@@ -1034,7 +1085,14 @@ Add-Type -AssemblyName System.Drawing
 `$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 `$form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 `$form.Bounds = New-Object System.Drawing.Rectangle($([int]$Area.x), $([int]$Area.y), $([int]$Area.width), $([int]$Area.height))
+`$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
 `$form.BackColor = [System.Drawing.Color]::White
+`$panelEdge = New-Object System.Windows.Forms.Panel
+`$panelEdge.Name = 'CogentStackPanelEdge'
+`$panelEdge.Dock = [System.Windows.Forms.DockStyle]::Right
+`$panelEdge.Width = 2
+`$panelEdge.BackColor = [System.Drawing.Color]::FromArgb(122, 137, 150)
+`$form.Controls.Add(`$panelEdge)
 `$form.ShowInTaskbar = `$false
 `$form.ShowIcon = `$false
 `$form.TopMost = `$false
@@ -1053,7 +1111,7 @@ Add-Type -AssemblyName System.Drawing
     }
     if (-not $divider) { throw 'Windows could not create the white CogentStack divider.' }
     Move-DesktopWindow $divider ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
-    Set-WhiteDividerLayer $divider
+    Set-WhiteDividerLayer $divider $PanelWindow
     return $divider
 }
 
@@ -1208,7 +1266,9 @@ function Resume-CompanionLayout($State) {
         } else {
             $null
         }
-        if (-not $activeLayout -or -not $activeLayout.verified) {
+        $activeHeaderVisible = Wait-CogentStackHeaderVisible $panelWindow $activeArea 10
+        $activeTopCropRemoved = [bool]($State.PSObject.Properties['browserTopCropRemoved'] -and [bool]$State.browserTopCropRemoved)
+        if (-not $activeLayout -or -not $activeLayout.verified -or -not $activeHeaderVisible -or -not $activeTopCropRemoved) {
             if ($activeDivider) {
                 [CogentStackClaudeWorkspaceWindows]::ShowWindow([IntPtr]$activeDivider.Handle, 0) | Out-Null
             }
@@ -1220,8 +1280,8 @@ function Resume-CompanionLayout($State) {
             return Resume-CompanionLayout $State
         }
         $activeDividerArea = Get-WhiteDividerArea $activeArea $activeClaudeWidth $activeGutter
-        $activeDivider = Start-WhiteDivider $activeDividerArea
-        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 9 -Force
+        $activeDivider = Start-WhiteDivider $activeDividerArea $panelWindow
+        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 11 -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$activeDivider.Handle) -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerProcessId -Value ([int]$activeDivider.ProcessId) -Force
         Save-LayoutState $State
@@ -1231,7 +1291,11 @@ function Resume-CompanionLayout($State) {
             resumed = $true
             fastResumeAvailable = $true
             whiteDivider = [bool]$activeDivider
+            dividerEdgeVisible = [bool]$activeDivider
+            dividerEdgeColor = '#7A8996'
             dividerMasksShadows = [bool]$activeDivider
+            headerVisible = [bool]$activeHeaderVisible
+            browserTopCropRemoved = $activeTopCropRemoved
             companionExitWatcherStarted = [bool]$watcher
         }
     }
@@ -1270,7 +1334,7 @@ function Resume-CompanionLayout($State) {
     $divider = $null
     try {
         $dividerArea = Get-WhiteDividerArea $area $claudeWidth $gutter
-        $divider = Start-WhiteDivider $dividerArea
+        $divider = Start-WhiteDivider $dividerArea $panelWindow
     } catch {
         Restore-BrowserWindow $panelWindow $State.panelOriginal ([Int64]$State.panelOriginalStyle)
         Restore-Window $claudeWindow $State.claudeDesktopOriginal
@@ -1281,24 +1345,43 @@ function Resume-CompanionLayout($State) {
     }
     Start-Sleep -Milliseconds 200
     $layout = Test-WorkspaceLayout $area $claudeWindow $pageOnly.contentFrame $gutter $divider
-    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 9 -Force
+    $headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
+    $layoutAccepted = [bool]($layout.verified -and $headerVisible -and $pageOnly.topCropRemoved)
+    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 11 -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$backdrop.Handle) -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$backdrop.ProcessId) -Force
     $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$divider.Handle) -Force
     $State | Add-Member -MemberType NoteProperty -Name dividerProcessId -Value ([int]$divider.ProcessId) -Force
     $State | Add-Member -MemberType NoteProperty -Name browserContentMode -Value 'page-only' -Force
     $State | Add-Member -MemberType NoteProperty -Name browserContentClipped -Value ([bool]$pageOnly.contentClipped) -Force
+    $State | Add-Member -MemberType NoteProperty -Name browserTopCropRemoved -Value ([bool]$pageOnly.topCropRemoved) -Force
     $State | Add-Member -MemberType NoteProperty -Name browserClipInsets -Value $pageOnly.clipInsets -Force
+    if (-not $layoutAccepted) {
+        $restore = Restore-CompanionLayout $State $false $true $true
+        return [ordered]@{
+            status = 'resume_rejected'
+            resumed = $false
+            fastResumeAvailable = $false
+            layoutVerified = $false
+            headerVisible = [bool]$headerVisible
+            browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
+            browserWindowRestored = [bool]$restore.browserWindowRestored
+        }
+    }
     Set-LayoutStateStatus $State 'active'
     $watcher = Start-CompanionExitWatcher
     return [ordered]@{
-        status = if ($layout.verified) { 'resumed' } else { 'resumed_unverified' }
+        status = if ($layoutAccepted) { 'resumed' } else { 'resumed_unverified' }
         resumed = $true
         fastResumeAvailable = $true
-        layoutVerified = [bool]$layout.verified
+        layoutVerified = $layoutAccepted
+        headerVisible = [bool]$headerVisible
+        browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
         splitPercent = 50
         gutter = $gutter
         whiteDivider = [bool]$divider
+        dividerEdgeVisible = [bool]$divider
+        dividerEdgeColor = '#7A8996'
         dividerMasksShadows = [bool]$layout.dividerAligned
         companionExitWatcherStarted = [bool]$watcher
         shortcut = Install-WorkModeShortcut
@@ -1436,31 +1519,6 @@ if ($Mode -eq 'WatchExit') {
             $watchPanel = Find-RememberedWindow $watchState 'panel'
             if (-not $watchPanel) { break }
             $watchAddress = Get-BrowserAddressValue $watchPanel
-            $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
-            $watchClaude = Find-RememberedWindow $watchState 'chatDesktop'
-            $watchDivider = Find-RememberedWindow $watchState 'divider'
-            if ($watchDivider) {
-                $foregroundHandle = [Int64][CogentStackClaudeWorkspaceWindows]::GetForegroundWindow()
-                $managedForeground = [bool](
-                    ($watchClaude -and $foregroundHandle -eq [Int64]$watchClaude.Handle) -or
-                    $foregroundHandle -eq [Int64]$watchPanel.Handle
-                )
-                $watchLayoutVerified = $false
-                if ($layoutStatus -eq 'active' -and $watchClaude) {
-                    $watchArea = Get-MonitorWorkingArea $watchClaude.Handle
-                    $watchGutter = if ($watchState.PSObject.Properties['gutter']) { [int]$watchState.gutter } else { 12 }
-                    $watchPanelFrame = Get-WebDocumentRectangle $watchPanel
-                    if ($watchPanelFrame) {
-                        $watchLayout = Test-WorkspaceLayout $watchArea $watchClaude $watchPanelFrame $watchGutter $watchDivider
-                        $watchLayoutVerified = [bool]$watchLayout.verified
-                    }
-                }
-                if ($layoutStatus -eq 'active' -and $managedForeground -and $watchLayoutVerified) {
-                    try { Set-WhiteDividerLayer $watchDivider } catch { }
-                } else {
-                    [CogentStackClaudeWorkspaceWindows]::ShowWindow([IntPtr]$watchDivider.Handle, 0) | Out-Null
-                }
-            }
             if (Test-CompanionProjectDeletionAddress $watchAddress) {
                 $deleted = Invoke-ApprovedProjectDeletion
                 $returnUrl = [string]$watchState.workspaceUrl
@@ -1470,6 +1528,33 @@ if ($Mode -eq 'WatchExit') {
                 Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
                 Start-Sleep -Milliseconds 500
                 continue
+            }
+            $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
+            $watchClaude = Find-RememberedWindow $watchState 'chatDesktop'
+            $watchDivider = Find-RememberedWindow $watchState 'divider'
+            if ($watchDivider) {
+                $watchLayoutVerified = $false
+                $watchHeaderVisible = $false
+                $watchTopCropRemoved = [bool]($watchState.PSObject.Properties['browserTopCropRemoved'] -and [bool]$watchState.browserTopCropRemoved)
+                if ($layoutStatus -eq 'active' -and $watchClaude) {
+                    $watchArea = Get-MonitorWorkingArea $watchClaude.Handle
+                    $watchGutter = if ($watchState.PSObject.Properties['gutter']) { [int]$watchState.gutter } else { 12 }
+                    $watchPanelFrame = Get-WebDocumentRectangle $watchPanel
+                    if ($watchPanelFrame) {
+                        $watchLayout = Test-WorkspaceLayout $watchArea $watchClaude $watchPanelFrame $watchGutter $watchDivider
+                        $watchLayoutVerified = [bool]$watchLayout.verified
+                        $watchHeaderVisible = Test-CogentStackHeaderVisible $watchPanel $watchArea
+                    }
+                }
+                if ($layoutStatus -eq 'active' -and $watchLayoutVerified -and $watchHeaderVisible -and $watchTopCropRemoved) {
+                    try { Set-WhiteDividerLayer $watchDivider $watchPanel } catch { }
+                } elseif ($layoutStatus -eq 'active' -and $watchLayoutVerified -and (-not $watchHeaderVisible -or -not $watchTopCropRemoved)) {
+                    try { Resume-CompanionLayout $watchState | Out-Null } catch { }
+                    Start-Sleep -Milliseconds 250
+                    continue
+                } else {
+                    [CogentStackClaudeWorkspaceWindows]::ShowWindow([IntPtr]$watchDivider.Handle, 0) | Out-Null
+                }
             }
             if (Test-CompanionExitAddress $watchAddress) {
                 Restore-CompanionLayout $watchState $false $true $true | Out-Null
@@ -1513,11 +1598,14 @@ if ($Mode -eq 'Inspect') {
         registeredDefault = if ($existingPanel) { [bool]$existingPanel.Browser.IsRegisteredDefault } elseif ($browsers.Count -gt 0) { [bool]$browsers[0].IsRegisteredDefault } else { $false }
         launchMode = 'reuse-existing-browser-tab'
         browserContentMode = if ($state -and $state.PSObject.Properties['browserContentMode']) { [string]$state.browserContentMode } else { 'normal-window' }
+        browserTopCropRemoved = [bool]($state -and $state.PSObject.Properties['browserTopCropRemoved'] -and [bool]$state.browserTopCropRemoved)
         layoutStatus = if ($state -and $state.PSObject.Properties['layoutStatus']) { [string]$state.layoutStatus } else { 'inactive' }
         fastResumeAvailable = [bool]($state -and $state.PSObject.Properties['layoutStatus'] -and [string]$state.layoutStatus -eq 'suspended')
         gutter = if ($state -and $state.PSObject.Properties['gutter']) { [int]$state.gutter } else { 0 }
         whiteBackdrop = [bool](Find-BackdropWindow)
         whiteDivider = [bool](Find-DividerWindow)
+        dividerEdgeVisible = [bool](Find-DividerWindow)
+        dividerEdgeColor = '#7A8996'
         dividerMasksShadows = [bool](Find-DividerWindow)
     })
     exit 0
@@ -1697,7 +1785,7 @@ try {
 $divider = $null
 try {
     $dividerArea = Get-WhiteDividerArea $area $claudeDesktopWidth $gutter
-    $divider = Start-WhiteDivider $dividerArea
+    $divider = Start-WhiteDivider $dividerArea $panelWindow
 } catch {
     Restore-BrowserWindow $panelWindow $panelOriginal $panelOriginalStyle
     Restore-Window $claudeDesktopWindow $claudeOriginal
@@ -1709,9 +1797,11 @@ try {
 Start-Sleep -Milliseconds 200
 
 $layout = Test-WorkspaceLayout $area $claudeDesktopWindow $pageOnly.contentFrame $gutter $divider
+$headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
+$layoutAccepted = [bool]($layout.verified -and $headerVisible -and $pageOnly.topCropRemoved)
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 $layoutState = [ordered]@{
-    schemaVersion = 9
+    schemaVersion = 11
     claudeDesktopHandle = [Int64]$claudeDesktopWindow.Handle
     claudeDesktopProcessId = [int]$claudeDesktopWindow.ProcessId
     claudeDesktopOriginal = $claudeOriginal
@@ -1732,6 +1822,7 @@ $layoutState = [ordered]@{
     retiredCompletedInstallTabs = $retiredCompletedInstallTabs
     browserContentMode = 'page-only'
     browserContentClipped = [bool]$pageOnly.contentClipped
+    browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
     browserClipInsets = $pageOnly.clipInsets
     gutter = $gutter
     accountState = [string]$panelSelection.AccountState
@@ -1739,15 +1830,30 @@ $layoutState = [ordered]@{
     layoutStatus = 'active'
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
 }
+if (-not $layoutAccepted) {
+    $restore = Restore-CompanionLayout $layoutState $false $true $true
+    Write-CompactJson ([ordered]@{
+        status = 'layout_rejected'
+        layoutVerified = $false
+        headerVisible = [bool]$headerVisible
+        browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
+        browserWindowRestored = [bool]$restore.browserWindowRestored
+        browserWindowMaximized = [bool]$restore.browserWindowMaximized
+        companionExitWatcherStarted = $false
+    })
+    exit 0
+}
 Save-LayoutState $layoutState
 
 $exitWatcher = Start-CompanionExitWatcher
 $workModeShortcut = Install-WorkModeShortcut
 
 Write-CompactJson ([ordered]@{
-    status = if ($layout.verified) { 'arranged' } else { 'opened_unarranged' }
+    status = if ($layoutAccepted) { 'arranged' } else { 'opened_unarranged' }
     layout = 'equal-split-claude-left-cogentstack-right'
-    layoutVerified = [bool]$layout.verified
+    layoutVerified = $layoutAccepted
+    headerVisible = [bool]$headerVisible
+    browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
     joined = [bool]$layout.joined
     separated = [bool]$layout.separated
     equalWidth = [bool]$layout.equalWidth
@@ -1756,6 +1862,8 @@ Write-CompactJson ([ordered]@{
     gutter = $gutter
     whiteBackdrop = $true
     whiteDivider = [bool]$divider
+    dividerEdgeVisible = [bool]$divider
+    dividerEdgeColor = '#7A8996'
     dividerMasksShadows = [bool]$layout.dividerAligned
     browserContentMode = 'page-only'
     browserChromeHidden = $true

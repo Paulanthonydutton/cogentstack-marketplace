@@ -36,7 +36,7 @@ for (const marker of [
   "hide-claude-sidebar.ps1",
   "open-cogentstack-panel.ps1",
   "normal Google Chrome or Microsoft Edge window",
-  "passive 12-pixel white divider",
+  "passive 12-pixel white divider with a two-pixel blue-grey rule",
   "maximized normal window",
   "fulfil-project.ps1",
   "delete-project.ps1",
@@ -64,6 +64,10 @@ if (JSON.stringify(actualScripts) !== JSON.stringify([...requiredScripts].sort()
   fail(`unexpected script inventory: ${actualScripts.join(", ")}`);
 }
 
+const deletionSource = await readFile(join(scriptsRoot, "delete-project.ps1"), "utf8");
+if (!deletionSource.includes("$_.ToLowerInvariant() -eq '.tmp'")) fail("deletion helper must use the .NET invariant lowercase method");
+if (deletionSource.includes("ToLocaleLowerInvariant")) fail("deletion helper contains a JavaScript-only string method");
+
 const ensureSource = await readFile(join(scriptsRoot, "ensure-cogentstack.ps1"), "utf8");
 if (!ensureSource.includes("https://cogentstack.app/stack?surface=claude-desktop")) fail("readiness helper does not use the Claude Desktop surface");
 if (ensureSource.includes("surface=chatgpt")) fail("readiness helper falls back to the ChatGPT surface");
@@ -80,11 +84,28 @@ for (const marker of [
   "WS_EX_TRANSPARENT",
   "WS_EX_NOACTIVATE",
   "dividerMasksShadows",
-  "$managedForeground",
+  "dividerEdgeVisible",
+  "CogentStackPanelEdge",
+  "FromArgb(122, 137, 150)",
+  "dividerEdgeColor = '#7A8996'",
   "$watchLayoutVerified",
+  "$watchHeaderVisible",
+  "function Test-CogentStackHeaderVisible",
+  "function Wait-CogentStackHeaderVisible",
+  "$topInset = if ($normalChromeHeight -gt 0)",
+  "$top = if ($PreserveOffscreenTop) { 0 } else { $documentTop }",
+  "Set-WindowContentRegion $Window $documentFinal $true",
+  "$documentTop -lt 0",
+  "topCropRemoved = [bool]($clipInsets.top -eq 0)",
+  "browserTopCropRemoved = [bool]$pageOnly.topCropRemoved",
+  "$layoutAccepted = [bool]($layout.verified -and $headerVisible -and $pageOnly.topCropRemoved)",
+  "status = 'resume_rejected'",
+  "status = 'layout_rejected'",
+  "SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle",
   "$activeLayout.verified",
   "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
-  "schemaVersion = 9",
+  "$parsed = ConvertTo-CogentStackUri $Address",
+  "schemaVersion = 11",
   "Start-CompanionExitWatcher",
   "Test-CompanionOwnedAddress",
   "Test-CompanionSuspendAddress",
@@ -112,6 +133,12 @@ for (const forbidden of ["--app=", "--new-window", "{F11}", "SetParent(", "FindW
   if (panelSource.includes(forbidden)) fail(`companion helper crosses the supported window boundary: ${forbidden}`);
 }
 if (panelSource.includes("TopMost = `$true")) fail("Claude divider must not be globally topmost");
+const claudeWatchAddressIndex = panelSource.indexOf("$watchAddress = Get-BrowserAddressValue $watchPanel");
+const claudeDeletionIndex = panelSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", claudeWatchAddressIndex);
+const claudeLayoutIndex = panelSource.indexOf("$layoutStatus =", claudeWatchAddressIndex);
+if (claudeWatchAddressIndex < 0 || claudeDeletionIndex <= claudeWatchAddressIndex || claudeDeletionIndex >= claudeLayoutIndex) {
+  fail("Claude companion must process approved deletion immediately after reading the normalized browser address");
+}
 
 const validateExistingTabReuse = (source, label) => {
   for (const marker of [
@@ -162,17 +189,40 @@ for (const marker of [
   "WS_EX_TRANSPARENT",
   "WS_EX_NOACTIVATE",
   "dividerMasksShadows",
-  "$managedForeground",
+  "dividerEdgeVisible",
+  "CogentStackPanelEdge",
+  "FromArgb(122, 137, 150)",
+  "dividerEdgeColor = '#7A8996'",
   "$watchLayoutVerified",
+  "$watchHeaderVisible",
+  "function Test-CogentStackHeaderVisible",
+  "function Wait-CogentStackHeaderVisible",
+  "$topInset = if ($normalChromeHeight -gt 0)",
+  "$top = if ($PreserveOffscreenTop) { 0 } else { $documentTop }",
+  "Set-WindowContentRegion $Window $documentFinal $true",
+  "$documentTop -lt 0",
+  "topCropRemoved = [bool]($clipInsets.top -eq 0)",
+  "browserTopCropRemoved = [bool]$pageOnly.topCropRemoved",
+  "$layoutAccepted = [bool]($layout.verified -and $headerVisible -and $pageOnly.topCropRemoved)",
+  "status = 'resume_rejected'",
+  "status = 'layout_rejected'",
+  "SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle",
   "$activeLayout.verified",
   "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
-  "schemaVersion = 9",
+  "$parsed = ConvertTo-CogentStackUri $Address",
+  "schemaVersion = 11",
   "$watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress)",
   "($Mode -eq 'Close')",
 ]) {
   if (!codexCompanionSource.includes(marker)) fail(`Codex companion helper is missing navigation recovery marker: ${marker}`);
 }
 if (codexCompanionSource.includes("TopMost = `$true")) fail("Codex divider must not be globally topmost");
+const codexWatchAddressIndex = codexCompanionSource.indexOf("$watchAddress = Get-BrowserAddressValue $watchPanel");
+const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexWatchAddressIndex);
+const codexLayoutIndex = codexCompanionSource.indexOf("$layoutStatus =", codexWatchAddressIndex);
+if (codexWatchAddressIndex < 0 || codexDeletionIndex <= codexWatchAddressIndex || codexDeletionIndex >= codexLayoutIndex) {
+  fail("Codex companion must process approved deletion immediately after reading the normalized browser address");
+}
 
 const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
 for (const marker of ["Get-Process -Name Claude", "Hide sidebar", "Show sidebar", "already_hidden"]) {
