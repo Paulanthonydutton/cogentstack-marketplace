@@ -119,6 +119,9 @@ public static class CogentStackClaudeWorkspaceWindows {
     [DllImport("user32.dll")]
     public static extern bool BringWindowToTop(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint command);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
@@ -195,6 +198,16 @@ public static class CogentStackClaudeWorkspaceWindows {
         var value = new StringBuilder(GetWindowTextLength(hWnd) + 1);
         GetWindowText(hWnd, value, value.Capacity);
         return value.ToString();
+    }
+
+    public static bool IsWindowAbove(IntPtr upper, IntPtr lower) {
+        if (upper == IntPtr.Zero || lower == IntPtr.Zero || upper == lower) return false;
+        var current = GetWindow(lower, 3);
+        while (current != IntPtr.Zero) {
+            if (current == upper) return true;
+            current = GetWindow(current, 3);
+        }
+        return false;
     }
 
     public static long GetWindowStyle(IntPtr hWnd) {
@@ -985,6 +998,22 @@ public static class CogentStackBackdropDpi {
     [DllImport("user32.dll")]
     public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 }
+
+function Test-WorkspacePanelsAboveBackdrop($Backdrop, $ClaudeWindow, $PanelWindow) {
+    $claudeAboveBackdrop = [bool](
+        $Backdrop -and $ClaudeWindow -and
+        [CogentStackClaudeWorkspaceWindows]::IsWindowAbove([IntPtr]$ClaudeWindow.Handle, [IntPtr]$Backdrop.Handle)
+    )
+    $panelAboveBackdrop = [bool](
+        $Backdrop -and $PanelWindow -and
+        [CogentStackClaudeWorkspaceWindows]::IsWindowAbove([IntPtr]$PanelWindow.Handle, [IntPtr]$Backdrop.Handle)
+    )
+    [ordered]@{
+        verified = $claudeAboveBackdrop -and $panelAboveBackdrop
+        claudeAboveBackdrop = $claudeAboveBackdrop
+        panelAboveBackdrop = $panelAboveBackdrop
+    }
+}
 '@
 [CogentStackBackdropDpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
 Add-Type -AssemblyName System.Windows.Forms
@@ -1281,6 +1310,19 @@ function Resume-CompanionLayout($State) {
         }
         $activeDividerArea = Get-WhiteDividerArea $activeArea $activeClaudeWidth $activeGutter
         $activeDivider = Start-WhiteDivider $activeDividerArea $panelWindow
+        $activeBackdrop = Find-RememberedWindow $State 'backdrop'
+        $activeLayering = Test-WorkspacePanelsAboveBackdrop $activeBackdrop $claudeWindow $panelWindow
+        if (-not $activeLayering.verified) {
+            $restore = Restore-CompanionLayout $State $false $true $true
+            return [ordered]@{
+                status = 'active_layout_rejected'
+                resumed = $false
+                fastResumeAvailable = $false
+                layoutVerified = $false
+                workspacePanelsAboveBackdrop = $false
+                browserWindowRestored = [bool]$restore.browserWindowRestored
+            }
+        }
         $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 11 -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$activeDivider.Handle) -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerProcessId -Value ([int]$activeDivider.ProcessId) -Force
@@ -1294,6 +1336,7 @@ function Resume-CompanionLayout($State) {
             dividerEdgeVisible = [bool]$activeDivider
             dividerEdgeColor = '#CDCDCD'
             dividerMasksShadows = [bool]$activeDivider
+            workspacePanelsAboveBackdrop = [bool]$activeLayering.verified
             headerVisible = [bool]$activeHeaderVisible
             browserTopCropRemoved = $activeTopCropRemoved
             companionExitWatcherStarted = [bool]$watcher
@@ -1345,8 +1388,9 @@ function Resume-CompanionLayout($State) {
     }
     Start-Sleep -Milliseconds 200
     $layout = Test-WorkspaceLayout $area $claudeWindow $pageOnly.contentFrame $gutter $divider
+    $layering = Test-WorkspacePanelsAboveBackdrop $backdrop $claudeWindow $panelWindow
     $headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
-    $layoutAccepted = [bool]($layout.verified -and $headerVisible -and $pageOnly.topCropRemoved)
+    $layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)
     $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 11 -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$backdrop.Handle) -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$backdrop.ProcessId) -Force
@@ -1363,6 +1407,7 @@ function Resume-CompanionLayout($State) {
             resumed = $false
             fastResumeAvailable = $false
             layoutVerified = $false
+            workspacePanelsAboveBackdrop = [bool]$layering.verified
             headerVisible = [bool]$headerVisible
             browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
             browserWindowRestored = [bool]$restore.browserWindowRestored
@@ -1383,6 +1428,7 @@ function Resume-CompanionLayout($State) {
         dividerEdgeVisible = [bool]$divider
         dividerEdgeColor = '#CDCDCD'
         dividerMasksShadows = [bool]$layout.dividerAligned
+        workspacePanelsAboveBackdrop = [bool]$layering.verified
         companionExitWatcherStarted = [bool]$watcher
         shortcut = Install-WorkModeShortcut
     }
@@ -1532,6 +1578,7 @@ if ($Mode -eq 'WatchExit') {
             $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
             $watchClaude = Find-RememberedWindow $watchState 'chatDesktop'
             $watchDivider = Find-RememberedWindow $watchState 'divider'
+            $watchBackdrop = Find-RememberedWindow $watchState 'backdrop'
             if ($watchDivider) {
                 $watchLayoutVerified = $false
                 $watchHeaderVisible = $false
@@ -1547,6 +1594,11 @@ if ($Mode -eq 'WatchExit') {
                     }
                 }
                 if ($layoutStatus -eq 'active' -and $watchLayoutVerified -and $watchHeaderVisible -and $watchTopCropRemoved) {
+                    $watchLayering = Test-WorkspacePanelsAboveBackdrop $watchBackdrop $watchClaude $watchPanel
+                    if (-not $watchLayering.verified) {
+                        Restore-CompanionLayout $watchState $false $true $true | Out-Null
+                        break
+                    }
                     try { Set-WhiteDividerLayer $watchDivider $watchPanel } catch { }
                 } elseif ($layoutStatus -eq 'active' -and $watchLayoutVerified -and (-not $watchHeaderVisible -or -not $watchTopCropRemoved)) {
                     try { Resume-CompanionLayout $watchState | Out-Null } catch { }
@@ -1797,8 +1849,9 @@ try {
 Start-Sleep -Milliseconds 200
 
 $layout = Test-WorkspaceLayout $area $claudeDesktopWindow $pageOnly.contentFrame $gutter $divider
+$layering = Test-WorkspacePanelsAboveBackdrop $backdrop $claudeDesktopWindow $panelWindow
 $headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
-$layoutAccepted = [bool]($layout.verified -and $headerVisible -and $pageOnly.topCropRemoved)
+$layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 $layoutState = [ordered]@{
     schemaVersion = 11
@@ -1835,6 +1888,7 @@ if (-not $layoutAccepted) {
     Write-CompactJson ([ordered]@{
         status = 'layout_rejected'
         layoutVerified = $false
+        workspacePanelsAboveBackdrop = [bool]$layering.verified
         headerVisible = [bool]$headerVisible
         browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
         browserWindowRestored = [bool]$restore.browserWindowRestored
@@ -1865,6 +1919,7 @@ Write-CompactJson ([ordered]@{
     dividerEdgeVisible = [bool]$divider
     dividerEdgeColor = '#CDCDCD'
     dividerMasksShadows = [bool]$layout.dividerAligned
+    workspacePanelsAboveBackdrop = [bool]$layering.verified
     browserContentMode = 'page-only'
     browserChromeHidden = $true
     browserContentClipped = [bool]$pageOnly.contentClipped
