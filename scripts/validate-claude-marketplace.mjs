@@ -36,7 +36,7 @@ for (const marker of [
   "hide-claude-sidebar.ps1",
   "open-cogentstack-panel.ps1",
   "normal Google Chrome or Microsoft Edge window",
-  "passive 12-pixel white divider with a two-pixel neutral-grey rule matching the adjacent app border",
+  "passive 12-pixel white divider with matching two-pixel neutral-grey rules at the desktop and CogentStack edges separated by eight pixels of white space",
   "maximized normal window",
   "fulfil-project.ps1",
   "delete-project.ps1",
@@ -130,6 +130,16 @@ for (const marker of [
   "status = 'resume_rejected'",
   "status = 'layout_rejected'",
   "SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle",
+  "CogentStackDesktopEdge",
+  "$desktopEdge.Dock = [System.Windows.Forms.DockStyle]::Left",
+  "$desktopEdge.Width = 2",
+  "CogentStackPanelEdge",
+  "$panelEdge.Dock = [System.Windows.Forms.DockStyle]::Right",
+  "$panelEdge.Width = 2",
+  "Local\\CogentStackCompanionOpen",
+  "function Enter-CompanionOpenMutex",
+  "function Exit-CompanionOpenMutex",
+  "$openMutex = Enter-CompanionOpenMutex",
   "$activeLayout.verified",
   "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
   "$parsed = ConvertTo-CogentStackUri $Address",
@@ -191,9 +201,11 @@ const validateExistingTabReuse = (source, label) => {
     fail(`${label} helper still reports a newly opened tab as reused`);
   }
   const selectionIndex = source.indexOf("$panelSelection = Find-ExistingCogentStackWindow");
+  const mutexIndex = source.indexOf("$openMutex = Enter-CompanionOpenMutex");
   const reuseIndex = source.indexOf("if ($panelSelection)", selectionIndex);
   const newTabIndex = source.indexOf("Start-Process -FilePath $preferredBrowser.ExecutablePath", selectionIndex);
-  if (selectionIndex < 0 || reuseIndex < selectionIndex || newTabIndex < reuseIndex) {
+  const mutexReleaseIndex = source.indexOf("Exit-CompanionOpenMutex $openMutex", newTabIndex);
+  if (mutexIndex < 0 || mutexIndex >= selectionIndex || selectionIndex < 0 || reuseIndex < selectionIndex || newTabIndex < reuseIndex || mutexReleaseIndex < newTabIndex) {
     fail(`${label} helper must reuse and navigate an existing CogentStack tab before opening a new tab`);
   }
 };

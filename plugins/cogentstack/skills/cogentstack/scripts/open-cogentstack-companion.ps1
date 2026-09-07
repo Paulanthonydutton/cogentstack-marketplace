@@ -11,6 +11,26 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Compress | Write-Output
 }
 
+function Enter-CompanionOpenMutex {
+    $mutex = New-Object System.Threading.Mutex($false, 'Local\CogentStackCompanionOpen')
+    $ownsMutex = $false
+    try {
+        $ownsMutex = $mutex.WaitOne(30000)
+    } catch [System.Threading.AbandonedMutexException] {
+        $ownsMutex = $true
+    }
+    if (-not $ownsMutex) {
+        $mutex.Dispose()
+        throw 'Another CogentStack launch is still selecting the shared workspace tab.'
+    }
+    return $mutex
+}
+
+function Exit-CompanionOpenMutex($Mutex) {
+    if (-not $Mutex) { return }
+    try { $Mutex.ReleaseMutex() } finally { $Mutex.Dispose() }
+}
+
 function Confirm-CogentStackUrl([string]$Candidate) {
     $parsed = $null
     if (-not [Uri]::TryCreate($Candidate, [UriKind]::Absolute, [ref]$parsed)) {
@@ -1137,6 +1157,12 @@ Add-Type -AssemblyName System.Drawing
 `$form.Bounds = New-Object System.Drawing.Rectangle($([int]$Area.x), $([int]$Area.y), $([int]$Area.width), $([int]$Area.height))
 `$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
 `$form.BackColor = [System.Drawing.Color]::White
+`$desktopEdge = New-Object System.Windows.Forms.Panel
+`$desktopEdge.Name = 'CogentStackDesktopEdge'
+`$desktopEdge.Dock = [System.Windows.Forms.DockStyle]::Left
+`$desktopEdge.Width = 2
+`$desktopEdge.BackColor = [System.Drawing.Color]::FromArgb(205, 205, 205)
+`$form.Controls.Add(`$desktopEdge)
 `$panelEdge = New-Object System.Windows.Forms.Panel
 `$panelEdge.Name = 'CogentStackPanelEdge'
 `$panelEdge.Dock = [System.Windows.Forms.DockStyle]::Right
@@ -1740,59 +1766,67 @@ if ($browsers.Count -eq 0) {
     exit 2
 }
 
-$panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
-$retiredCompletedInstallTabs = 0
-if ($panelSelection -and -not [bool]$panelSelection.IsTerminalInstall) {
-    $retiredCompletedInstallTabs = Remove-TerminalCogentStackInstallationTabs $browsers
-    if ($retiredCompletedInstallTabs -gt 0) {
-        $panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
+$openMutex = Enter-CompanionOpenMutex
+try {
+    # Re-scan only after taking the shared launch lock. Concurrent invocations
+    # therefore observe the tab opened by the first process instead of racing
+    # into additional browser tabs.
+    $panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
+    $retiredCompletedInstallTabs = 0
+    if ($panelSelection -and -not [bool]$panelSelection.IsTerminalInstall) {
+        $retiredCompletedInstallTabs = Remove-TerminalCogentStackInstallationTabs $browsers
+        if ($retiredCompletedInstallTabs -gt 0) {
+            $panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
+        }
     }
-}
-$reusedExistingTab = [bool]$panelSelection
-$reusedExistingHomeTab = $false
-$reusedTerminalInstallTab = $false
-$openedNewTab = $false
-if ($panelSelection) {
-    if (-not (Select-BrowserTabCandidate $panelSelection)) {
-        Write-CompactJson ([ordered]@{
-            status = 'opened_unarranged'
-            message = 'An existing CogentStack tab was found, but Windows could not select it safely.'
-            browser = [string]$panelSelection.Browser.Name
-            reusedExistingTab = $true
-            openedNewTab = $false
-            retiredCompletedInstallTabs = $retiredCompletedInstallTabs
-        })
-        exit 0
-    }
-    $reusedExistingHomeTab = [bool]$panelSelection.IsHome
-    $reusedTerminalInstallTab = [bool]$panelSelection.IsTerminalInstall
-    if (-not [bool]$panelSelection.IsWorkspace) {
-        if (-not (Set-BrowserWorkspaceAddress $panelSelection.Window $safeUrl)) {
+    $reusedExistingTab = [bool]$panelSelection
+    $reusedExistingHomeTab = $false
+    $reusedTerminalInstallTab = $false
+    $openedNewTab = $false
+    if ($panelSelection) {
+        if (-not (Select-BrowserTabCandidate $panelSelection)) {
             Write-CompactJson ([ordered]@{
                 status = 'opened_unarranged'
-                message = 'An existing CogentStack tab was found, but it could not be navigated safely to the workspace.'
+                message = 'An existing CogentStack tab was found, but Windows could not select it safely.'
                 browser = [string]$panelSelection.Browser.Name
                 reusedExistingTab = $true
-                reusedExistingHomeTab = $reusedExistingHomeTab
-                reusedTerminalInstallTab = $reusedTerminalInstallTab
                 openedNewTab = $false
                 retiredCompletedInstallTabs = $retiredCompletedInstallTabs
-                accountState = [string]$panelSelection.AccountState
             })
             exit 0
         }
-        $panelSelection.IsWorkspace = $true
-        $panelSelection.AccountState = Wait-AccountState $panelSelection.Window
+        $reusedExistingHomeTab = [bool]$panelSelection.IsHome
+        $reusedTerminalInstallTab = [bool]$panelSelection.IsTerminalInstall
+        if (-not [bool]$panelSelection.IsWorkspace) {
+            if (-not (Set-BrowserWorkspaceAddress $panelSelection.Window $safeUrl)) {
+                Write-CompactJson ([ordered]@{
+                    status = 'opened_unarranged'
+                    message = 'An existing CogentStack tab was found, but it could not be navigated safely to the workspace.'
+                    browser = [string]$panelSelection.Browser.Name
+                    reusedExistingTab = $true
+                    reusedExistingHomeTab = $reusedExistingHomeTab
+                    reusedTerminalInstallTab = $reusedTerminalInstallTab
+                    openedNewTab = $false
+                    retiredCompletedInstallTabs = $retiredCompletedInstallTabs
+                    accountState = [string]$panelSelection.AccountState
+                })
+                exit 0
+            }
+            $panelSelection.IsWorkspace = $true
+            $panelSelection.AccountState = Wait-AccountState $panelSelection.Window
+        }
     }
-}
-if (-not $panelSelection) {
-    $preferredBrowser = $browsers[0]
-    Start-Process -FilePath $preferredBrowser.ExecutablePath -ArgumentList @($safeUrl) | Out-Null
-    $openedNewTab = $true
-    for ($attempt = 0; $attempt -lt 40 -and -not $panelSelection; $attempt++) {
-        Start-Sleep -Milliseconds 250
-        $panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
+    if (-not $panelSelection) {
+        $preferredBrowser = $browsers[0]
+        Start-Process -FilePath $preferredBrowser.ExecutablePath -ArgumentList @($safeUrl) | Out-Null
+        $openedNewTab = $true
+        for ($attempt = 0; $attempt -lt 40 -and -not $panelSelection; $attempt++) {
+            Start-Sleep -Milliseconds 250
+            $panelSelection = Find-ExistingCogentStackWindow $browsers $true | Select-Object -First 1
+        }
     }
+} finally {
+    Exit-CompanionOpenMutex $openMutex
 }
 
 if (-not $panelSelection) {
