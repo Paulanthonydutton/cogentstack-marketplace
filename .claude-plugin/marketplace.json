@@ -11,7 +11,7 @@
       "name": "cogentstack",
       "source": "./claude-plugins/cogentstack",
       "description": "Reuse one CogentStack workspace beside Claude Code Desktop, retire only completed installation tabs, and fulfil explicitly approved Contract Pack projects.",
-      "version": "0.2.4",
+      "version": "0.2.6",
       "author": {
         "name": "CogentStack"
       },

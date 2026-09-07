@@ -7,7 +7,7 @@ description: Open the hosted CogentStack workspace as a signed-in browser compan
 
 CogentStack's public Claude plugin reuses a normal Google Chrome or Microsoft Edge window that already contains the CogentStack workspace or home page, navigates that same tab to the hosted workspace when needed, and then arranges that browser beside the active Claude Code Desktop window. It never repurposes a pending installation, account, or legal page. A completed or superseded installation page is explicitly marked by the website and may be reused only when no workspace or home tab exists; when a workspace already exists, the launcher retires only those marked terminal installation tabs and never closes a browser window by removing its sole tab. Reusing the normal browser profile lets an existing CogentStack website login remain visible without copying cookies or pretending that Claude inherits the browser session. Only when no CogentStack workspace, home, or safely reusable terminal installation tab exists may the helper open the workspace URL once as a normal tab. The bundled Windows helpers coordinate two independent application windows; they do not embed, scrape, re-parent, or automate Claude's private conversation interface. No separate CogentStack Desktop installer is required.
 
-The companion layout hides Claude's sidebar when its accessible toggle can be identified, places Claude and the CogentStack page at equal width over a white backdrop, leaves a 12-pixel vertical divider, and clips ordinary browser controls so the right side reads as a page-only working panel. It never uses browser F11 fullscreen. The CogentStack surface supplies the sticky header, contextual sponsored strip, visible account state, and an X control that returns the browser to the CogentStack home page in a maximized normal window. If another action navigates the reserved companion tab away from `cogentstack.app`, the exit watcher immediately removes the crop and restores that page in an ordinary maximized browser window.
+The companion layout hides Claude's sidebar when its accessible toggle can be identified, places Claude and the CogentStack page at equal width over a white backdrop, places a passive 12-pixel white divider above both Windows shadows, and clips ordinary browser controls so the right side reads as a page-only working panel. It never uses browser F11 fullscreen. The CogentStack surface supplies the sticky header, contextual sponsored strip, visible account state, and an X control that returns the browser to the CogentStack home page in a maximized normal window. If another action navigates the reserved companion tab away from `cogentstack.app`, the exit watcher immediately removes the crop and divider and restores that page in an ordinary maximized browser window.
 
 The plugin does not distribute contracts, task blueprints, compatibility rules, licence-validation logic, or a local project generator. CogentStack's protected server produces request-bound artifacts, and the local helper verifies and writes only an artifact the user explicitly approved. The public package does not activate protected access. The installation page must authenticate the CogentStack account and record an explicit acceptance of the current versioned Terms and EULA for that installation before it creates an opaque `cgb_...` installation request. That reference is the only permitted handoff into Claude: it is private, short-lived, single-use, and binds the website account and confirmation to the Windows installation. Never collect assent, login details, licence details, or Desktop credentials in Claude. The resulting DPAPI-protected installation credential may renew without another legal confirmation while it remains the account's one active ChatGPT or Claude Desktop installation.
 
@@ -68,13 +68,15 @@ After the user approves the exact project setup and target in the hosted CogentS
 
 ## Delete an explicitly approved project and folder
 
-Only after the user types the exact project name and approves deletion in CogentStack:
+Typing the exact project name and selecting **Delete project and folder** in CogentStack is the single explicit confirmation. In companion mode, the page signals the authenticated local watcher, which runs `delete-project.ps1 -Mode delete` against the sole server-authoritative request without requiring a second Claude command. A manual deletion request is a recovery path only when that automatic handoff was unavailable.
+
+When recovering an already approved deletion from Claude:
 
 1. Run `delete-project.ps1 -Mode inspect`.
 2. Continue only for its sole current authoritative deletion request.
 3. Run `delete-project.ps1 -Mode delete -RequestId <approved UUID>`.
 4. Never delete a conversationally supplied path or bypass the helper. Treat success as proven only by `status: deleted` and report the exact target and `folderRemoved` value.
-5. State clearly that an acknowledged registration deletion is permanent and unrecoverable.
+5. State clearly that the folder, preview watcher, project registration, active-project selection, runtime and Git snapshots and requests, Deployment Packs, contract-compilation measurements, project-bound Contract Runtime session, and the deletion request itself are permanently removed and unrecoverable.
 
 ## Prepare an independent deployment handoff
 

@@ -212,6 +212,7 @@ public static class CogentStackWorkspaceWindows {
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
 $statePath = Join-Path $stateRoot 'chatgpt-companion-layout.json'
 $backdropTitle = 'CogentStack Workspace Backdrop'
+$dividerTitle = 'CogentStack Workspace Divider'
 
 function Get-WindowRectangle([Int64]$Handle) {
     $rectangle = New-Object CogentStackWorkspaceWindows+RECT
@@ -414,11 +415,13 @@ function Find-RememberedWindow($State, [string]$Kind) {
     $handleProperty = switch ($Kind) {
         'panel' { 'panelHandle' }
         'backdrop' { 'backdropHandle' }
+        'divider' { 'dividerHandle' }
         default { 'chatDesktopHandle' }
     }
     $processProperty = switch ($Kind) {
         'panel' { 'panelProcessId' }
         'backdrop' { 'backdropProcessId' }
+        'divider' { 'dividerProcessId' }
         default { 'chatDesktopProcessId' }
     }
     if (-not $State.PSObject.Properties[$handleProperty] -or -not $State.PSObject.Properties[$processProperty]) { return $null }
@@ -620,6 +623,14 @@ function Test-CompanionResumeAddress([string]$Address) {
     $parsed = ConvertTo-CogentStackUri $Address
     if ($null -eq $parsed -or $parsed.AbsolutePath -ne '/stack') { return $false }
     return $parsed.Query -match '(?i)(?:^|[?&])companion=resume(?:&|$)'
+}
+
+function Test-CompanionProjectDeletionAddress([string]$Address) {
+    if (-not (Test-CogentStackAddress $Address)) { return $false }
+    $parsed = $null
+    if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$parsed)) { return $false }
+    return $parsed.AbsolutePath.TrimEnd('/') -eq '/stack' -and
+        $parsed.Query -match '(?i)(?:^|[?&])desktop_action=delete_project(?:&|$)'
 }
 
 function Test-CompanionOwnedAddress([string]$Address) {
@@ -909,6 +920,10 @@ function Find-BackdropWindow {
     @(Get-DesktopWindows | Where-Object { $_.Title -eq $backdropTitle -and $_.ProcessName -match '(?i)^(powershell|pwsh)$' } | Select-Object -First 1)
 }
 
+function Find-DividerWindow {
+    @(Get-DesktopWindows | Where-Object { $_.Title -eq $dividerTitle -and $_.ProcessName -match '(?i)^(powershell|pwsh)$' } | Select-Object -First 1)
+}
+
 function Set-WhiteBackdropLayer($Backdrop, $BehindWindow) {
     if (-not $Backdrop -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$Backdrop.Handle) -or
         -not $BehindWindow -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$BehindWindow.Handle)) {
@@ -972,6 +987,92 @@ Add-Type -AssemblyName System.Drawing
     return $backdrop
 }
 
+function Get-WhiteDividerArea($Area, [int]$LeftWidth, [int]$Gutter) {
+    if ($Gutter -le 0) { throw 'The CogentStack divider requires a positive gutter.' }
+    [ordered]@{
+        x = [int]$Area.x + $LeftWidth
+        y = [int]$Area.y
+        width = $Gutter
+        height = [int]$Area.height
+    }
+}
+
+function Set-WhiteDividerLayer($Divider) {
+    if (-not $Divider -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$Divider.Handle)) {
+        throw 'The white CogentStack divider is unavailable.'
+    }
+    [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Divider.Handle, 5) | Out-Null
+    if (-not [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x0013)) {
+        throw 'Windows could not place the white CogentStack divider above the panel shadows.'
+    }
+}
+
+function Start-WhiteDivider($Area) {
+    $existing = @(Find-DividerWindow | Select-Object -First 1)
+    if ($existing) {
+        Move-DesktopWindow $existing ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
+        Set-WhiteDividerLayer $existing
+        return $existing
+    }
+
+    $dividerScript = @"
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class CogentStackDividerWindow {
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int index);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+    private static extern IntPtr GetWindowLong32(IntPtr hWnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr")]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int index, IntPtr value);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+    private static extern IntPtr SetWindowLong32(IntPtr hWnd, int index, IntPtr value);
+    public static void MakePassive(IntPtr hWnd) {
+        const int GWL_EXSTYLE = -20;
+        const long WS_EX_TRANSPARENT = 0x00000020L;
+        const long WS_EX_TOOLWINDOW = 0x00000080L;
+        const long WS_EX_NOACTIVATE = 0x08000000L;
+        long style = IntPtr.Size == 8 ? GetWindowLongPtr64(hWnd, GWL_EXSTYLE).ToInt64() : GetWindowLong32(hWnd, GWL_EXSTYLE).ToInt64();
+        IntPtr value = new IntPtr(style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+        if (IntPtr.Size == 8) SetWindowLongPtr64(hWnd, GWL_EXSTYLE, value);
+        else SetWindowLong32(hWnd, GWL_EXSTYLE, value);
+    }
+}
+'@
+[CogentStackDividerWindow]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+`$form = New-Object System.Windows.Forms.Form
+`$form.Text = '$dividerTitle'
+`$form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+`$form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+`$form.Bounds = New-Object System.Drawing.Rectangle($([int]$Area.x), $([int]$Area.y), $([int]$Area.width), $([int]$Area.height))
+`$form.BackColor = [System.Drawing.Color]::White
+`$form.ShowInTaskbar = `$false
+`$form.ShowIcon = `$false
+`$form.TopMost = `$true
+[CogentStackDividerWindow]::MakePassive(`$form.Handle)
+[System.Windows.Forms.Application]::Run(`$form)
+"@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($dividerScript))
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    $powershellPath = if ($powershellCommand) { [string]$powershellCommand.Source } else { $null }
+    if (-not $powershellPath) { throw 'Windows PowerShell is required to display the white CogentStack divider.' }
+    $dividerProcess = Start-Process -FilePath $powershellPath -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded) -WindowStyle Hidden -PassThru
+    $divider = $null
+    for ($attempt = 0; $attempt -lt 30 -and -not $divider; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        $divider = @(Get-DesktopWindows | Where-Object { $_.ProcessId -eq $dividerProcess.Id -and $_.Title -eq $dividerTitle } | Select-Object -First 1)
+    }
+    if (-not $divider) { throw 'Windows could not create the white CogentStack divider.' }
+    Move-DesktopWindow $divider ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
+    Set-WhiteDividerLayer $divider
+    return $divider
+}
+
 function Restore-Window($Window, $Rectangle) {
     if ($Window -and $Rectangle) {
         Move-DesktopWindow $Window ([int]$Rectangle.x) ([int]$Rectangle.y) ([int]$Rectangle.width) ([int]$Rectangle.height)
@@ -1001,6 +1102,15 @@ function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState
     $rememberedChat = Find-RememberedWindow $State 'chatDesktop'
     $rememberedPanel = Find-RememberedWindow $State 'panel'
     $rememberedBackdrop = Find-RememberedWindow $State 'backdrop'
+    $rememberedDivider = Find-RememberedWindow $State 'divider'
+    if (-not $rememberedDivider) { $rememberedDivider = @(Find-DividerWindow | Select-Object -First 1) }
+    if ($rememberedDivider) {
+        if ($HideBackdrop) {
+            [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$rememberedDivider.Handle, 0) | Out-Null
+        } else {
+            [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$rememberedDivider.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
+    }
     if ($rememberedBackdrop) {
         if ($HideBackdrop) {
             [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$rememberedBackdrop.Handle, 0) | Out-Null
@@ -1032,6 +1142,7 @@ function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState
         browserWindowRestored = [bool]$rememberedPanel
         browserWindowMaximized = $browserWindowMaximized
         backdropFound = [bool]$rememberedBackdrop
+        dividerFound = [bool]$rememberedDivider
     }
 }
 
@@ -1103,20 +1214,30 @@ function Resume-CompanionLayout($State) {
     $layoutStatus = if ($State.PSObject.Properties['layoutStatus']) { [string]$State.layoutStatus } else { 'active' }
     if ($layoutStatus -eq 'active') {
         $activeArea = Get-MonitorWorkingArea $chatWindow.Handle
+        $activeGutter = if ($State.PSObject.Properties['gutter']) { [int]$State.gutter } else { 12 }
+        $activeAvailableWidth = [int]$activeArea.width - $activeGutter
+        $activeChatWidth = [Math]::Floor($activeAvailableWidth / 2)
         $activeBackdrop = Find-RememberedWindow $State 'backdrop'
         if (-not $activeBackdrop) {
-            $activeBackdrop = Start-WhiteBackdrop $activeArea $chatWindow
+            $activeBackdrop = Start-WhiteBackdrop $activeArea $panelWindow
             $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$activeBackdrop.Handle) -Force
             $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$activeBackdrop.ProcessId) -Force
             Save-LayoutState $State
         } else {
             Move-DesktopWindow $activeBackdrop ([int]$activeArea.x) ([int]$activeArea.y) ([int]$activeArea.width) ([int]$activeArea.height)
-            Set-WhiteBackdropLayer $activeBackdrop $chatWindow
+            Set-WhiteBackdropLayer $activeBackdrop $panelWindow
         }
         [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$panelWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
         [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$chatWindow.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013) | Out-Null
         [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$panelWindow.Handle) | Out-Null
         [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$chatWindow.Handle) | Out-Null
+        $activeDividerArea = Get-WhiteDividerArea $activeArea $activeChatWidth $activeGutter
+        $activeDivider = Start-WhiteDivider $activeDividerArea
+        Set-WhiteBackdropLayer $activeBackdrop $panelWindow
+        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 8 -Force
+        $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$activeDivider.Handle) -Force
+        $State | Add-Member -MemberType NoteProperty -Name dividerProcessId -Value ([int]$activeDivider.ProcessId) -Force
+        Save-LayoutState $State
         $watcher = Start-CompanionExitWatcher
         return [ordered]@{
             status = 'already_active'
@@ -1124,6 +1245,8 @@ function Resume-CompanionLayout($State) {
             fastResumeAvailable = $true
             whiteBackdrop = [bool]$activeBackdrop
             backdropLayer = if ($activeBackdrop) { 'above-desktop-behind-panels' } else { 'missing' }
+            whiteDivider = [bool]$activeDivider
+            dividerMasksShadows = [bool]$activeDivider
             companionExitWatcherStarted = [bool]$watcher
         }
     }
@@ -1158,10 +1281,26 @@ function Resume-CompanionLayout($State) {
     [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$panelWindow.Handle) | Out-Null
     [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$chatWindow.Handle) | Out-Null
     [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$chatWindow.Handle) | Out-Null
+    $divider = $null
+    try {
+        $dividerArea = Get-WhiteDividerArea $area $chatWidth $gutter
+        $divider = Start-WhiteDivider $dividerArea
+        Set-WhiteBackdropLayer $backdrop $panelWindow
+    } catch {
+        Restore-BrowserWindow $panelWindow $State.panelOriginal ([Int64]$State.panelOriginalStyle)
+        Restore-Window $chatWindow $State.chatDesktopOriginal
+        if ($backdrop -and [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$backdrop.Handle)) {
+            [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$backdrop.Handle, 0) | Out-Null
+        }
+        throw
+    }
     Start-Sleep -Milliseconds 200
-    $layout = Test-WorkspaceLayout $area $chatWindow $pageOnly.contentFrame $gutter
+    $layout = Test-WorkspaceLayout $area $chatWindow $pageOnly.contentFrame $gutter $divider
+    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 8 -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$backdrop.Handle) -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$backdrop.ProcessId) -Force
+    $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$divider.Handle) -Force
+    $State | Add-Member -MemberType NoteProperty -Name dividerProcessId -Value ([int]$divider.ProcessId) -Force
     $State | Add-Member -MemberType NoteProperty -Name browserContentMode -Value 'page-only' -Force
     $State | Add-Member -MemberType NoteProperty -Name browserContentClipped -Value ([bool]$pageOnly.contentClipped) -Force
     $State | Add-Member -MemberType NoteProperty -Name browserClipInsets -Value $pageOnly.clipInsets -Force
@@ -1176,6 +1315,8 @@ function Resume-CompanionLayout($State) {
         gutter = $gutter
         whiteBackdrop = $true
         backdropLayer = 'above-desktop-behind-panels'
+        whiteDivider = [bool]$divider
+        dividerMasksShadows = [bool]$layout.dividerAligned
         companionExitWatcherStarted = [bool]$watcher
         shortcut = Install-WorkModeShortcut
     }
@@ -1207,9 +1348,32 @@ function Start-CompanionExitWatcher {
     ) -WindowStyle Hidden -PassThru
 }
 
-function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter) {
+function Invoke-ApprovedProjectDeletion {
+    $deleteScript = Join-Path $PSScriptRoot 'delete-project.ps1'
+    if (-not (Test-Path -LiteralPath $deleteScript -PathType Leaf)) { return $false }
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $powershellCommand) { return $false }
+    try {
+        $process = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $deleteScript,
+            '-Mode',
+            'delete'
+        ) -WindowStyle Hidden -Wait -PassThru
+        return $process.ExitCode -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter, $DividerWindow) {
     $chat = Get-VisibleWindowRectangle $ChatWindow.Handle
     $panel = $PanelFrame
+    $divider = if ($DividerWindow) { Get-WindowRectangle $DividerWindow.Handle } else { $null }
     $chatRight = [int]$chat.x + [int]$chat.width
     $panelRight = [int]$panel.x + [int]$panel.width
     $areaRight = [int]$Area.x + [int]$Area.width
@@ -1218,6 +1382,13 @@ function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter) {
     $areaBottom = [int]$Area.y + [int]$Area.height
     $tolerance = 1
     $gapAligned = [Math]::Abs(($chatRight + $Gutter) - [int]$panel.x) -le $tolerance
+    $dividerAligned = [bool](
+        $divider -and
+        [Math]::Abs([int]$divider.x - $chatRight) -le $tolerance -and
+        [Math]::Abs([int]$divider.y - [int]$Area.y) -le $tolerance -and
+        [Math]::Abs([int]$divider.width - $Gutter) -le $tolerance -and
+        [Math]::Abs([int]$divider.height - [int]$Area.height) -le $tolerance
+    )
     [ordered]@{
         verified = (
             [Math]::Abs([int]$chat.x - [int]$Area.x) -le $tolerance -and
@@ -1227,14 +1398,17 @@ function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter) {
             [Math]::Abs([int]$chat.width - [int]$panel.width) -le $tolerance -and
             [Math]::Abs($panelRight - $areaRight) -le $tolerance -and
             [Math]::Abs($chatBottom - $areaBottom) -le $tolerance -and
-            [Math]::Abs($panelBottom - $areaBottom) -le $tolerance
+            [Math]::Abs($panelBottom - $areaBottom) -le $tolerance -and
+            $dividerAligned
         )
         joined = $Gutter -eq 0 -and $gapAligned
         separated = $Gutter -gt 0 -and $gapAligned
         equalWidth = [Math]::Abs([int]$chat.width - [int]$panel.width) -le $tolerance
         topAligned = [Math]::Abs([int]$chat.y - [int]$panel.y) -le $tolerance
+        dividerAligned = $dividerAligned
         chat = $chat
         panel = $panel
+        divider = $divider
     }
 }
 
@@ -1280,6 +1454,30 @@ if ($Mode -eq 'WatchExit') {
             if (-not $watchPanel) { break }
             $watchAddress = Get-BrowserAddressValue $watchPanel
             $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
+            $watchChat = Find-RememberedWindow $watchState 'chatDesktop'
+            $watchDivider = Find-RememberedWindow $watchState 'divider'
+            if ($watchDivider) {
+                $foregroundHandle = [Int64][CogentStackWorkspaceWindows]::GetForegroundWindow()
+                $managedForeground = [bool](
+                    ($watchChat -and $foregroundHandle -eq [Int64]$watchChat.Handle) -or
+                    $foregroundHandle -eq [Int64]$watchPanel.Handle
+                )
+                if ($layoutStatus -eq 'active' -and $managedForeground) {
+                    try { Set-WhiteDividerLayer $watchDivider } catch { }
+                } else {
+                    [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$watchDivider.Handle, 0) | Out-Null
+                }
+            }
+            if (Test-CompanionProjectDeletionAddress $watchAddress) {
+                $deleted = Invoke-ApprovedProjectDeletion
+                $returnUrl = [string]$watchState.workspaceUrl
+                if (-not $deleted) {
+                    $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_deletion=failed"
+                }
+                Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
+                Start-Sleep -Milliseconds 500
+                continue
+            }
             if (Test-CompanionExitAddress $watchAddress) {
                 Restore-CompanionLayout $watchState $false $true $true | Out-Null
                 break
@@ -1326,6 +1524,8 @@ if ($Mode -eq 'Inspect') {
         fastResumeAvailable = [bool]($state -and $state.PSObject.Properties['layoutStatus'] -and [string]$state.layoutStatus -eq 'suspended')
         gutter = if ($state -and $state.PSObject.Properties['gutter']) { [int]$state.gutter } else { 0 }
         whiteBackdrop = [bool](Find-BackdropWindow)
+        whiteDivider = [bool](Find-DividerWindow)
+        dividerMasksShadows = [bool](Find-DividerWindow)
     })
     exit 0
 }
@@ -1342,6 +1542,7 @@ if ($Mode -eq 'Hide') {
         browserWindowRestored = [bool]$restore.browserWindowRestored
         browserWindowMaximized = [bool]$restore.browserWindowMaximized
         backdropFound = [bool]$restore.backdropFound
+        dividerFound = [bool]$restore.dividerFound
         fastResumeAvailable = [bool]$state
     })
     exit 0
@@ -1354,6 +1555,7 @@ if ($Mode -eq 'Close') {
         browserWindowRestored = [bool]$restore.browserWindowRestored
         browserWindowMaximized = [bool]$restore.browserWindowMaximized
         backdropFound = [bool]$restore.backdropFound
+        dividerFound = [bool]$restore.dividerFound
         fastResumeAvailable = $false
     })
     exit 0
@@ -1499,12 +1701,25 @@ try {
 [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$panelWindow.Handle) | Out-Null
 [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$chatDesktopWindow.Handle) | Out-Null
 [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$chatDesktopWindow.Handle) | Out-Null
+$divider = $null
+try {
+    $dividerArea = Get-WhiteDividerArea $area $chatDesktopWidth $gutter
+    $divider = Start-WhiteDivider $dividerArea
+    Set-WhiteBackdropLayer $backdrop $panelWindow
+} catch {
+    Restore-BrowserWindow $panelWindow $panelOriginal $panelOriginalStyle
+    Restore-Window $chatDesktopWindow $chatOriginal
+    if ($backdrop -and [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$backdrop.Handle)) {
+        [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$backdrop.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    }
+    throw
+}
 Start-Sleep -Milliseconds 200
 
-$layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame $gutter
+$layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame $gutter $divider
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 $layoutState = [ordered]@{
-    schemaVersion = 7
+    schemaVersion = 8
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
@@ -1515,6 +1730,8 @@ $layoutState = [ordered]@{
     panelOriginalStyle = $panelOriginalStyle
     backdropHandle = [Int64]$backdrop.Handle
     backdropProcessId = [int]$backdrop.ProcessId
+    dividerHandle = [Int64]$divider.Handle
+    dividerProcessId = [int]$divider.ProcessId
     browser = [string]$browser.Name
     reusedExistingTab = $reusedExistingTab
     reusedExistingHomeTab = $reusedExistingHomeTab
@@ -1547,6 +1764,8 @@ Write-CompactJson ([ordered]@{
     gutter = $gutter
     whiteBackdrop = $true
     backdropLayer = 'above-desktop-behind-panels'
+    whiteDivider = [bool]$divider
+    dividerMasksShadows = [bool]$layout.dividerAligned
     browserContentMode = 'page-only'
     browserChromeHidden = $true
     browserContentClipped = [bool]$pageOnly.contentClipped

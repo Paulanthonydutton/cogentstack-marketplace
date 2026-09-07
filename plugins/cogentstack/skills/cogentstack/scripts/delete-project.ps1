@@ -18,6 +18,7 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
 $serviceUrl = 'https://cogentstack.app'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
+$previewWatcherRoot = Join-Path $stateRoot 'preview-watchers'
 
 function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 8 -Compress | Write-Output
@@ -116,6 +117,72 @@ function Resolve-ApprovedDeletionTarget(
     return $targetFull
 }
 
+function Get-DecodedProcessCommand($Process) {
+    $commandLine = [string]$Process.CommandLine
+    if ($commandLine -match '(?i)-(?:EncodedCommand|enc)\s+(?:"([A-Za-z0-9+/=]+)"|''([A-Za-z0-9+/=]+)''|([A-Za-z0-9+/=]+))') {
+        $encoded = @($Matches[1], $Matches[2], $Matches[3]) | Where-Object { $_ } | Select-Object -First 1
+        if ($encoded) {
+            try { $commandLine += "`n$([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($encoded)))" } catch { }
+        }
+    }
+    return $commandLine
+}
+
+function Stop-VerifiedProjectProcesses([string]$ExactTargetPath, [string]$ExactRequestId) {
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $owned = New-Object 'Collections.Generic.HashSet[int]'
+    foreach ($process in $processes) {
+        $processId = [int]$process.ProcessId
+        if ($processId -le 0 -or $processId -eq $PID) { continue }
+        $command = Get-DecodedProcessCommand $process
+        if (
+            $command.IndexOf($ExactTargetPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            ($command.IndexOf('generate-project-preview.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+             $command.IndexOf($ExactRequestId, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+        ) {
+            $owned.Add($processId) | Out-Null
+        }
+    }
+
+    $changed = $true
+    while ($changed) {
+        $changed = $false
+        foreach ($process in $processes) {
+            $processId = [int]$process.ProcessId
+            if ($processId -le 0 -or $processId -eq $PID -or $owned.Contains($processId)) { continue }
+            if ($owned.Contains([int]$process.ParentProcessId)) {
+                $owned.Add($processId) | Out-Null
+                $changed = $true
+            }
+        }
+    }
+
+    $remaining = New-Object 'Collections.Generic.HashSet[int]'
+    foreach ($processId in $owned) { $remaining.Add($processId) | Out-Null }
+    while ($remaining.Count -gt 0) {
+        $leaves = @($remaining | Where-Object {
+            $candidate = $_
+            -not ($processes | Where-Object { $remaining.Contains([int]$_.ProcessId) -and [int]$_.ParentProcessId -eq $candidate } | Select-Object -First 1)
+        })
+        if ($leaves.Count -eq 0) { $leaves = @($remaining) }
+        foreach ($processId in $leaves) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+            $remaining.Remove($processId) | Out-Null
+        }
+    }
+
+    $watcherPath = Join-Path $previewWatcherRoot "$ExactRequestId.json"
+    if (Test-Path -LiteralPath $watcherPath -PathType Leaf) {
+        try {
+            $watcherState = Get-Content -Raw -LiteralPath $watcherPath | ConvertFrom-Json
+            if ([string]$watcherState.requestId -eq $ExactRequestId) {
+                Remove-Item -LiteralPath $watcherPath -Force
+            }
+        } catch { }
+    }
+    return $owned.Count
+}
+
 if (-not (Test-Path -LiteralPath $credentialPath)) {
     Write-CompactJson ([ordered]@{ status = 'not_connected' })
     exit 0
@@ -162,6 +229,7 @@ $executionGrant = ''
 $deletionDigest = ''
 $claimed = $false
 $folderRemoved = $false
+$processesStopped = 0
 
 try {
     $claim = Invoke-CogentStackApi -Method Post -Path '/api/plugin/project-deletions' -Token $token -Body @{
@@ -188,6 +256,8 @@ try {
     }
     $targetPath = Resolve-ApprovedDeletionTarget @targetParameters
 
+    $processesStopped = Stop-VerifiedProjectProcesses $targetPath $projectRequestId
+
     if (Test-Path -LiteralPath $targetPath) {
         Remove-Item -LiteralPath $targetPath -Recurse -Force
         if (Test-Path -LiteralPath $targetPath) {
@@ -201,12 +271,25 @@ try {
     } else {
         "Project folder was already absent; registration deleted for $targetPath."
     }
-    $completed = Invoke-CogentStackApi -Method Patch -Path '/api/plugin/project-deletions' -Token $token -Body @{
-        action = 'complete'
-        requestId = $RequestId
-        deletionDigest = $deletionDigest
-        executionGrant = $executionGrant
-        statusMessage = $completionMessage
+    $completed = $null
+    for ($attempt = 1; $attempt -le 3 -and $null -eq $completed; $attempt++) {
+        try {
+            $completed = Invoke-CogentStackApi -Method Patch -Path '/api/plugin/project-deletions' -Token $token -Body @{
+                action = 'complete'
+                requestId = $RequestId
+                deletionDigest = $deletionDigest
+                executionGrant = $executionGrant
+                statusMessage = $completionMessage
+            }
+        } catch {
+            $remainingRequests = @((Invoke-CogentStackApi -Method Get -Path '/api/plugin/project-deletions' -Token $token).requests)
+            if (-not ($remainingRequests | Where-Object { [string]$_.id -eq $RequestId })) {
+                $completed = [pscustomobject]@{ status = 'deleted' }
+                break
+            }
+            if ($attempt -eq 3) { throw }
+            Start-Sleep -Milliseconds (250 * $attempt)
+        }
     }
     if ([string]$completed.status -ne 'deleted') {
         throw 'CogentStack did not confirm the project registration as deleted.'
@@ -218,6 +301,7 @@ try {
         projectRequestId = $projectRequestId
         targetPath = $targetPath
         folderRemoved = $folderRemoved
+        processesStopped = $processesStopped
         recoverable = $false
     })
 } catch {
