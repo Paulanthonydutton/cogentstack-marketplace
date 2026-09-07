@@ -1002,8 +1002,13 @@ function Set-WhiteDividerLayer($Divider) {
         throw 'The white CogentStack divider is unavailable.'
     }
     [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Divider.Handle, 5) | Out-Null
-    if (-not [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x0013)) {
-        throw 'Windows could not place the white CogentStack divider above the panel shadows.'
+    # Keep the divider in the ordinary desktop z-order. HWND_TOPMOST made the
+    # narrow mask survive above a maximized browser and visibly cut through
+    # Chrome's tabs, controls, and document whenever the split was disturbed.
+    $demoted = [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr](-2), 0, 0, 0, 0, 0x0013)
+    $raised = [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013)
+    if (-not $demoted -or -not $raised) {
+        throw 'Windows could not place the white CogentStack divider in the panel z-order.'
     }
 }
 
@@ -1053,7 +1058,7 @@ Add-Type -AssemblyName System.Drawing
 `$form.BackColor = [System.Drawing.Color]::White
 `$form.ShowInTaskbar = `$false
 `$form.ShowIcon = `$false
-`$form.TopMost = `$true
+`$form.TopMost = `$false
 [CogentStackDividerWindow]::MakePassive(`$form.Handle)
 [System.Windows.Forms.Application]::Run(`$form)
 "@
@@ -1217,6 +1222,24 @@ function Resume-CompanionLayout($State) {
         $activeGutter = if ($State.PSObject.Properties['gutter']) { [int]$State.gutter } else { 12 }
         $activeAvailableWidth = [int]$activeArea.width - $activeGutter
         $activeChatWidth = [Math]::Floor($activeAvailableWidth / 2)
+        $activeDivider = Find-RememberedWindow $State 'divider'
+        $activePanelFrame = Get-WebDocumentRectangle $panelWindow
+        $activeLayout = if ($activeDivider -and $activePanelFrame) {
+            Test-WorkspaceLayout $activeArea $chatWindow $activePanelFrame $activeGutter $activeDivider
+        } else {
+            $null
+        }
+        if (-not $activeLayout -or -not $activeLayout.verified) {
+            if ($activeDivider) {
+                [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$activeDivider.Handle, 0) | Out-Null
+            }
+            if ($State.PSObject.Properties['browserContentClipped'] -and [bool]$State.browserContentClipped) {
+                Clear-WindowRegion $panelWindow
+            }
+            $State | Add-Member -MemberType NoteProperty -Name layoutStatus -Value 'suspended' -Force
+            Save-LayoutState $State
+            return Resume-CompanionLayout $State
+        }
         $activeBackdrop = Find-RememberedWindow $State 'backdrop'
         if (-not $activeBackdrop) {
             $activeBackdrop = Start-WhiteBackdrop $activeArea $panelWindow
@@ -1234,7 +1257,7 @@ function Resume-CompanionLayout($State) {
         $activeDividerArea = Get-WhiteDividerArea $activeArea $activeChatWidth $activeGutter
         $activeDivider = Start-WhiteDivider $activeDividerArea
         Set-WhiteBackdropLayer $activeBackdrop $panelWindow
-        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 8 -Force
+        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 9 -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$activeDivider.Handle) -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerProcessId -Value ([int]$activeDivider.ProcessId) -Force
         Save-LayoutState $State
@@ -1296,7 +1319,7 @@ function Resume-CompanionLayout($State) {
     }
     Start-Sleep -Milliseconds 200
     $layout = Test-WorkspaceLayout $area $chatWindow $pageOnly.contentFrame $gutter $divider
-    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 8 -Force
+    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 9 -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$backdrop.Handle) -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$backdrop.ProcessId) -Force
     $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$divider.Handle) -Force
@@ -1462,7 +1485,17 @@ if ($Mode -eq 'WatchExit') {
                     ($watchChat -and $foregroundHandle -eq [Int64]$watchChat.Handle) -or
                     $foregroundHandle -eq [Int64]$watchPanel.Handle
                 )
-                if ($layoutStatus -eq 'active' -and $managedForeground) {
+                $watchLayoutVerified = $false
+                if ($layoutStatus -eq 'active' -and $watchChat) {
+                    $watchArea = Get-MonitorWorkingArea $watchChat.Handle
+                    $watchGutter = if ($watchState.PSObject.Properties['gutter']) { [int]$watchState.gutter } else { 12 }
+                    $watchPanelFrame = Get-WebDocumentRectangle $watchPanel
+                    if ($watchPanelFrame) {
+                        $watchLayout = Test-WorkspaceLayout $watchArea $watchChat $watchPanelFrame $watchGutter $watchDivider
+                        $watchLayoutVerified = [bool]$watchLayout.verified
+                    }
+                }
+                if ($layoutStatus -eq 'active' -and $managedForeground -and $watchLayoutVerified) {
                     try { Set-WhiteDividerLayer $watchDivider } catch { }
                 } else {
                     [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$watchDivider.Handle, 0) | Out-Null
@@ -1719,7 +1752,7 @@ Start-Sleep -Milliseconds 200
 $layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame $gutter $divider
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 $layoutState = [ordered]@{
-    schemaVersion = 8
+    schemaVersion = 9
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal

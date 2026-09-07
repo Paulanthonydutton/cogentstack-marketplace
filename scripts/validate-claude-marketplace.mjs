@@ -81,8 +81,10 @@ for (const marker of [
   "WS_EX_NOACTIVATE",
   "dividerMasksShadows",
   "$managedForeground",
+  "$watchLayoutVerified",
+  "$activeLayout.verified",
   "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
-  "schemaVersion = 8",
+  "schemaVersion = 9",
   "Start-CompanionExitWatcher",
   "Test-CompanionOwnedAddress",
   "Test-CompanionSuspendAddress",
@@ -109,6 +111,7 @@ for (const marker of [
 for (const forbidden of ["--app=", "--new-window", "{F11}", "SetParent(", "FindWindow(", "SendKeys", "cogentstack://desktop"]) {
   if (panelSource.includes(forbidden)) fail(`companion helper crosses the supported window boundary: ${forbidden}`);
 }
+if (panelSource.includes("TopMost = `$true")) fail("Claude divider must not be globally topmost");
 
 const validateExistingTabReuse = (source, label) => {
   for (const marker of [
@@ -160,13 +163,16 @@ for (const marker of [
   "WS_EX_NOACTIVATE",
   "dividerMasksShadows",
   "$managedForeground",
+  "$watchLayoutVerified",
+  "$activeLayout.verified",
   "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
-  "schemaVersion = 8",
+  "schemaVersion = 9",
   "$watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress)",
   "($Mode -eq 'Close')",
 ]) {
   if (!codexCompanionSource.includes(marker)) fail(`Codex companion helper is missing navigation recovery marker: ${marker}`);
 }
+if (codexCompanionSource.includes("TopMost = `$true")) fail("Codex divider must not be globally topmost");
 
 const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
 for (const marker of ["Get-Process -Name Claude", "Hide sidebar", "Show sidebar", "already_hidden"]) {

@@ -981,8 +981,13 @@ function Set-WhiteDividerLayer($Divider) {
         throw 'The white CogentStack divider is unavailable.'
     }
     [CogentStackClaudeWorkspaceWindows]::ShowWindow([IntPtr]$Divider.Handle, 5) | Out-Null
-    if (-not [CogentStackClaudeWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr](-1), 0, 0, 0, 0, 0x0013)) {
-        throw 'Windows could not place the white CogentStack divider above the panel shadows.'
+    # Keep the divider in the ordinary desktop z-order. HWND_TOPMOST made the
+    # narrow mask survive above a maximized browser and visibly cut through
+    # Chrome's tabs, controls, and document whenever the split was disturbed.
+    $demoted = [CogentStackClaudeWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr](-2), 0, 0, 0, 0, 0x0013)
+    $raised = [CogentStackClaudeWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013)
+    if (-not $demoted -or -not $raised) {
+        throw 'Windows could not place the white CogentStack divider in the panel z-order.'
     }
 }
 
@@ -1032,7 +1037,7 @@ Add-Type -AssemblyName System.Drawing
 `$form.BackColor = [System.Drawing.Color]::White
 `$form.ShowInTaskbar = `$false
 `$form.ShowIcon = `$false
-`$form.TopMost = `$true
+`$form.TopMost = `$false
 [CogentStackClaudeDividerWindow]::MakePassive(`$form.Handle)
 [System.Windows.Forms.Application]::Run(`$form)
 "@
@@ -1196,9 +1201,27 @@ function Resume-CompanionLayout($State) {
         $activeGutter = if ($State.PSObject.Properties['gutter']) { [int]$State.gutter } else { 12 }
         $activeAvailableWidth = [int]$activeArea.width - $activeGutter
         $activeClaudeWidth = [Math]::Floor($activeAvailableWidth / 2)
+        $activeDivider = Find-RememberedWindow $State 'divider'
+        $activePanelFrame = Get-WebDocumentRectangle $panelWindow
+        $activeLayout = if ($activeDivider -and $activePanelFrame) {
+            Test-WorkspaceLayout $activeArea $claudeWindow $activePanelFrame $activeGutter $activeDivider
+        } else {
+            $null
+        }
+        if (-not $activeLayout -or -not $activeLayout.verified) {
+            if ($activeDivider) {
+                [CogentStackClaudeWorkspaceWindows]::ShowWindow([IntPtr]$activeDivider.Handle, 0) | Out-Null
+            }
+            if ($State.PSObject.Properties['browserContentClipped'] -and [bool]$State.browserContentClipped) {
+                Clear-WindowRegion $panelWindow
+            }
+            $State | Add-Member -MemberType NoteProperty -Name layoutStatus -Value 'suspended' -Force
+            Save-LayoutState $State
+            return Resume-CompanionLayout $State
+        }
         $activeDividerArea = Get-WhiteDividerArea $activeArea $activeClaudeWidth $activeGutter
         $activeDivider = Start-WhiteDivider $activeDividerArea
-        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 8 -Force
+        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 9 -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$activeDivider.Handle) -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerProcessId -Value ([int]$activeDivider.ProcessId) -Force
         Save-LayoutState $State
@@ -1258,7 +1281,7 @@ function Resume-CompanionLayout($State) {
     }
     Start-Sleep -Milliseconds 200
     $layout = Test-WorkspaceLayout $area $claudeWindow $pageOnly.contentFrame $gutter $divider
-    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 8 -Force
+    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 9 -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$backdrop.Handle) -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$backdrop.ProcessId) -Force
     $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$divider.Handle) -Force
@@ -1422,7 +1445,17 @@ if ($Mode -eq 'WatchExit') {
                     ($watchClaude -and $foregroundHandle -eq [Int64]$watchClaude.Handle) -or
                     $foregroundHandle -eq [Int64]$watchPanel.Handle
                 )
-                if ($layoutStatus -eq 'active' -and $managedForeground) {
+                $watchLayoutVerified = $false
+                if ($layoutStatus -eq 'active' -and $watchClaude) {
+                    $watchArea = Get-MonitorWorkingArea $watchClaude.Handle
+                    $watchGutter = if ($watchState.PSObject.Properties['gutter']) { [int]$watchState.gutter } else { 12 }
+                    $watchPanelFrame = Get-WebDocumentRectangle $watchPanel
+                    if ($watchPanelFrame) {
+                        $watchLayout = Test-WorkspaceLayout $watchArea $watchClaude $watchPanelFrame $watchGutter $watchDivider
+                        $watchLayoutVerified = [bool]$watchLayout.verified
+                    }
+                }
+                if ($layoutStatus -eq 'active' -and $managedForeground -and $watchLayoutVerified) {
                     try { Set-WhiteDividerLayer $watchDivider } catch { }
                 } else {
                     [CogentStackClaudeWorkspaceWindows]::ShowWindow([IntPtr]$watchDivider.Handle, 0) | Out-Null
@@ -1678,7 +1711,7 @@ Start-Sleep -Milliseconds 200
 $layout = Test-WorkspaceLayout $area $claudeDesktopWindow $pageOnly.contentFrame $gutter $divider
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 $layoutState = [ordered]@{
-    schemaVersion = 8
+    schemaVersion = 9
     claudeDesktopHandle = [Int64]$claudeDesktopWindow.Handle
     claudeDesktopProcessId = [int]$claudeDesktopWindow.ProcessId
     claudeDesktopOriginal = $claudeOriginal
