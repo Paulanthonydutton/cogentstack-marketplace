@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'project-context.ps1')
 $projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
 $BaseUrl = "https://cogentstack.app"
-$CredentialPath = Join-Path $env:LOCALAPPDATA "CogentStack\claude-desktop-credential.json"
+$CredentialPath = Join-Path $env:LOCALAPPDATA "CogentStack\desktop-credential.json"
 
 function Read-Credential {
   if (-not (Test-Path -LiteralPath $CredentialPath -PathType Leaf)) { throw "CogentStack Desktop is not connected." }

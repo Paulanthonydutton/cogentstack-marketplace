@@ -27,4 +27,3 @@ function Invoke-CogentStackNativeCommand {
         Output = $nativeOutput.Trim()
     }
 }
-

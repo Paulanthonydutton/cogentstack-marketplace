@@ -21,7 +21,7 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
 
 $serviceUrl = 'https://cogentstack.app'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
-$credentialPath = Join-Path $stateRoot 'claude-desktop-credential.json'
+$credentialPath = Join-Path $stateRoot 'desktop-credential.json'
 $previewWatcherRoot = Join-Path $stateRoot 'preview-watchers'
 
 function Write-CompactJson($Value) {

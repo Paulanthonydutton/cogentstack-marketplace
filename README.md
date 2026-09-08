@@ -20,9 +20,9 @@ node scripts/validate-claude-marketplace.mjs
 
 ## Claude Code Desktop
 
-The Claude plugin is installed from this Git marketplace and retains `$cogentstack` as the common CogentStack invocation. On Windows its default helpers hide the Claude sidebar when the accessible toggle is available, select an existing `surface=claude-desktop` CogentStack tab in normal Chrome or Edge, preserve that browser profile's visible login state, and arrange Claude and the page-only CogentStack panel at equal width over a white backdrop with a 12-pixel divider. It does not use browser F11, copy cookies, launch an app-mode browser window, embed, scrape, re-parent, or automate Claude's private interface. The CogentStack header X restores and maximizes the normal browser on the CogentStack home page. No separate CogentStack Desktop installer is required.
+The Claude plugin retains `$cogentstack` as the common invocation. It resolves the current Claude Code Desktop project's isolated logical CogentStack context, starts or reuses the same background Desktop Bridge used by CogentStack Web and Qwen Desktop, and returns the matching web URL. It does not open or inspect browser tabs, hide the Claude sidebar, resize windows, embed CogentStack, or automate Claude's private interface.
 
-Claude Web is intentionally outside this package. It will use a separate remote-connector flow later.
+Claude Web is intentionally outside this package. It may use a separate remote-connector flow later.
 
 ## ChatGPT and Codex Desktop
 

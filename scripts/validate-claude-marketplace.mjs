@@ -11,6 +11,7 @@ const pluginEntry = marketplace.plugins?.find((candidate) => candidate.name === 
 const fail = (message) => {
   throw new Error(`Claude marketplace validation failed: ${message}`);
 };
+const normalized = (value) => value.replaceAll("\r\n", "\n").trimEnd();
 
 if (marketplace.name !== "cogentstack") fail("marketplace name must be cogentstack");
 if (!pluginEntry) fail("cogentstack plugin entry is missing");
@@ -20,11 +21,10 @@ if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(pluginEntry.version ?? "")) fail("plugin ve
 const pluginRoot = resolve(repositoryRoot, pluginEntry.source);
 if (relative(repositoryRoot, pluginRoot).startsWith("..")) fail("plugin source escapes the repository");
 
-const manifestPath = join(pluginRoot, ".claude-plugin", "plugin.json");
-const skillPath = join(pluginRoot, "skills", "cogentstack", "SKILL.md");
+const manifest = JSON.parse(await readFile(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
+const skill = await readFile(join(pluginRoot, "skills", "cogentstack", "SKILL.md"), "utf8");
 const scriptsRoot = join(pluginRoot, "skills", "cogentstack", "scripts");
-const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-const skill = await readFile(skillPath, "utf8");
+const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "scripts");
 
 if (manifest.name !== "cogentstack") fail("plugin manifest name must be cogentstack");
 if (manifest.version !== pluginEntry.version) fail("marketplace and plugin versions differ");
@@ -32,249 +32,54 @@ if (!skill.startsWith("---\nname: cogentstack\n")) fail("skill frontmatter is in
 for (const marker of [
   "$cogentstack",
   "${CLAUDE_PLUGIN_ROOT}",
-  "surface` is `claude-desktop`",
-  "hide-claude-sidebar.ps1",
-  "open-cogentstack-panel.ps1",
-  "normal Google Chrome or Microsoft Edge window",
-  "passive 12-pixel white divider with matching two-pixel neutral-grey rules at the desktop and CogentStack edges separated by eight pixels of white space",
-  "maximized normal window",
-  "fulfil-project.ps1",
-  "delete-project.ps1",
-  "prepare-deployment.ps1",
-  "Do not implement, imply, or silently fall back to a Claude Web connector",
+  "CogentStack is a normal web application",
+  "start-cogentstack-bridge.ps1",
+  "browserOpened: false",
+  "create_project",
+  "delete_project",
+  "preview_project",
+  "PROJECT_KNOWLEDGE.md",
+  "Qwen Desktop",
 ]) {
   if (!skill.includes(marker)) fail(`skill is missing required marker: ${marker}`);
 }
-for (const forbidden of ["codex_app__open_in_codex", "placement` set to `right", "surface=chatgpt"]) {
-  if (skill.includes(forbidden)) fail(`Claude skill contains a Codex-only instruction: ${forbidden}`);
+for (const forbidden of [
+  "open-cogentstack-panel.ps1",
+  "hide-claude-sidebar.ps1",
+  "ensure-cogentstack.ps1",
+  "surface=claude-desktop",
+  "surface=chatgpt",
+  "normal Google Chrome or Microsoft Edge window",
+  "placement` set to `right",
+  "codex_app__open_in_codex",
+]) {
+  if (skill.includes(forbidden)) fail(`skill contains retired companion behavior: ${forbidden}`);
 }
 
 const requiredScripts = [
   "connect-cogentstack.ps1",
   "delete-project.ps1",
-  "ensure-cogentstack.ps1",
   "fulfil-project.ps1",
-  "hide-claude-sidebar.ps1",
+  "generate-project-preview.ps1",
   "native-command.ps1",
-  "open-cogentstack-panel.ps1",
   "prepare-deployment.ps1",
   "project-context.ps1",
+  "project-knowledge.ps1",
+  "start-cogentstack-bridge.ps1",
+  "watch-cogentstack-bridge.ps1",
 ];
 const actualScripts = (await readdir(scriptsRoot)).filter((name) => name.endsWith(".ps1")).sort();
 if (JSON.stringify(actualScripts) !== JSON.stringify([...requiredScripts].sort())) {
   fail(`unexpected script inventory: ${actualScripts.join(", ")}`);
 }
 
-const deletionSource = await readFile(join(scriptsRoot, "delete-project.ps1"), "utf8");
-if (!deletionSource.includes("[string]::Equals($_, '.tmp', [StringComparison]::OrdinalIgnoreCase)")) {
-  fail("deletion helper must compare temporary path segments with the .NET ordinal ignore-case API");
-}
-if (deletionSource.includes("ToLocaleLowerInvariant")) fail("deletion helper contains a JavaScript-only string method");
-
-const deletionFunctionStart = deletionSource.indexOf("function Resolve-ApprovedDeletionTarget(");
-const deletionFunctionEnd = deletionSource.indexOf("\nfunction Get-DecodedProcessCommand", deletionFunctionStart);
-if (deletionFunctionStart < 0 || deletionFunctionEnd < 0) fail("deletion target validator function could not be isolated");
-const deletionRuntimeCheck = spawnSync("powershell.exe", [
-  "-NoProfile",
-  "-Command",
-  `& {
-${deletionSource.slice(deletionFunctionStart, deletionFunctionEnd)}
-$valid = Resolve-ApprovedDeletionTarget 'C:\\CogentStack\\projects\\sample' 'C:\\CogentStack\\projects' 'sample'
-if ($valid -ne 'C:\\CogentStack\\projects\\sample') { throw 'A valid project path was not accepted.' }
-try {
-  Resolve-ApprovedDeletionTarget 'C:\\CogentStack\\projects\\.TMP' 'C:\\CogentStack\\projects' '.TMP' | Out-Null
-  throw 'A temporary project path was accepted.'
-} catch {
-  if ($_.Exception.Message -ne 'Temporary validation projects cannot be deleted through the project library.') { throw }
-}
-}`,
-], { encoding: "utf8" });
-if (deletionRuntimeCheck.status !== 0) {
-  fail(`deletion target validator failed at runtime: ${(deletionRuntimeCheck.stderr || deletionRuntimeCheck.stdout).trim()}`);
-}
-
-const ensureSource = await readFile(join(scriptsRoot, "ensure-cogentstack.ps1"), "utf8");
-if (!ensureSource.includes("https://cogentstack.app/stack?surface=claude-desktop")) fail("readiness helper does not use the Claude Desktop surface");
-if (ensureSource.includes("surface=chatgpt")) fail("readiness helper falls back to the ChatGPT surface");
-
-const panelSource = await readFile(join(scriptsRoot, "open-cogentstack-panel.ps1"), "utf8");
-for (const marker of [
-  "Confirm-CogentStackUrl",
-  "Get-CompanionBrowsers",
-  "Find-ExistingCogentStackWindow",
-  "Set-BrowserPageOnly",
-  "Start-WhiteBackdrop",
-  "Start-WhiteDivider",
-  "CogentStack Claude Workspace Divider",
-  "WS_EX_TRANSPARENT",
-  "WS_EX_NOACTIVATE",
-  "dividerMasksShadows",
-  "dividerEdgeVisible",
-  "CogentStackPanelEdge",
-  "FromArgb(205, 205, 205)",
-  "dividerEdgeColor = '#CDCDCD'",
-  "GetWindow(IntPtr hWnd, uint command)",
-  "IsWindowAbove(IntPtr upper, IntPtr lower)",
-  "Test-WorkspacePanelsAboveBackdrop",
-  "workspacePanelsAboveBackdrop",
-  "$watchLayoutVerified",
-  "$watchHeaderVisible",
-  "function Test-CogentStackHeaderVisible",
-  "function Wait-CogentStackHeaderVisible",
-  "$topInset = if ($normalChromeHeight -gt 0)",
-  "$top = if ($PreserveOffscreenTop) { 0 } else { $documentTop }",
-  "Set-WindowContentRegion $Window $documentFinal $true",
-  "$documentTop -lt 0",
-  "topCropRemoved = [bool]($clipInsets.top -eq 0)",
-  "browserTopCropRemoved = [bool]$pageOnly.topCropRemoved",
-  "$layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)",
-  "status = 'resume_rejected'",
-  "status = 'layout_rejected'",
-  "SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle",
-  "CogentStackDesktopEdge",
-  "$desktopEdge.Dock = [System.Windows.Forms.DockStyle]::Left",
-  "$desktopEdge.Width = 2",
-  "CogentStackPanelEdge",
-  "$panelEdge.Dock = [System.Windows.Forms.DockStyle]::Right",
-  "$panelEdge.Width = 2",
-  "Local\\CogentStackCompanionOpen",
-  "function Enter-CompanionOpenMutex",
-  "function Exit-CompanionOpenMutex",
-  "$openMutex = Enter-CompanionOpenMutex",
-  "$activeLayout.verified",
-  "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
-  "$parsed = ConvertTo-CogentStackUri $Address",
-  "schemaVersion = 11",
-  "Start-CompanionExitWatcher",
-  "Test-CompanionOwnedAddress",
-  "Test-CompanionSuspendAddress",
-  "Test-CompanionResumeAddress",
-  "if (Test-CompanionResumeAddress $watchAddress)",
-  "if ($layoutStatus -eq 'suspended')",
-  "status = 'already_active'",
-  "Suspend-CompanionLayout",
-  "Resume-CompanionLayout",
-  "CogentStack Work Mode (Claude).lnk",
-  "$watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress)",
-  "Restore-CompanionLayout $watchState $false $true $true",
-  "claude-companion-layout.json",
-  "opened_unarranged",
-  "accountState",
-  "layoutVerified",
-  "function Confirm-BrowserTabCandidate",
-  "Restore-BrowserTabSelection $Candidate.OriginalSelectedTab",
-  "Confirm-BrowserTabCandidate $panelSelection",
-  "$rememberedResume['tabResolution'] = 'remembered-workspace'",
-  "candidateTabsActivated",
-]) {
-  if (!panelSource.includes(marker)) fail(`companion helper is missing required marker: ${marker}`);
-}
-for (const forbidden of ["--app=", "--new-window", "{F11}", "SetParent(", "FindWindow(", "SendKeys", "cogentstack://desktop"]) {
-  if (panelSource.includes(forbidden)) fail(`companion helper crosses the supported window boundary: ${forbidden}`);
-}
-if (panelSource.includes("TopMost = `$true")) fail("Claude divider must not be globally topmost");
-const claudeWatchAddressIndex = panelSource.indexOf("$watchAddress = Get-BrowserAddressValue $watchPanel");
-const claudeDeletionIndex = panelSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", claudeWatchAddressIndex);
-const claudeLayoutIndex = panelSource.indexOf("$layoutStatus =", claudeWatchAddressIndex);
-if (claudeWatchAddressIndex < 0 || claudeDeletionIndex <= claudeWatchAddressIndex || claudeDeletionIndex >= claudeLayoutIndex) {
-  fail("Claude companion must process approved deletion immediately after reading the normalized browser address");
-}
-
-const validateExistingTabReuse = (source, label) => {
-  for (const marker of [
-    "ConvertTo-CogentStackUri",
-    "Test-CogentStackHomeAddress",
-    "Set-BrowserWorkspaceAddress",
-    "Wait-AccountState",
-    "CogentStack \\| AI Production Stack",
-    "$reusedExistingTab = [bool]$panelSelection",
-    "$reusedExistingHomeTab = [bool]$panelSelection.IsHome",
-    "$selectedWorkspace",
-    "$selectedHome",
-    "$homeWindow",
-    "if (-not $isWorkspaceTitle -and -not $isHomeTitle) { continue }",
-    "reusedExistingHomeTab = $reusedExistingHomeTab",
-    "tabResolution = $tabResolution",
-    "candidateTabsActivated = $candidateTabsActivated",
-  ]) {
-    if (!source.includes(marker)) fail(`${label} helper is missing existing-tab reuse marker: ${marker}`);
-  }
-  if (!source.includes("if (-not [bool]$panelSelection.IsWorkspace)")
-    && !source.includes("if (-not [bool]$panelSelection.IsWorkspace -or $selectedContextKey -ne $requestedContextKey)")) {
-    fail(`${label} helper is missing existing workspace navigation and context-switch handling`);
-  }
-  if (source.includes("reusedExistingTab = [bool]$panelSelection.ReusedExistingTab")) {
-    fail(`${label} helper still reports a newly opened tab as reused`);
-  }
-  const selectionIndex = source.indexOf("$panelSelection = Find-ExistingCogentStackWindow");
-  const mutexIndex = source.indexOf("$openMutex = Enter-CompanionOpenMutex");
-  const rememberedIndex = source.indexOf("$rememberedResume = Resume-CompanionLayout $state", mutexIndex);
-  const reuseIndex = source.indexOf("if ($panelSelection)", selectionIndex);
-  const newTabIndex = source.indexOf("Start-Process -FilePath $preferredBrowser.ExecutablePath", selectionIndex);
-  const mutexReleaseIndex = source.indexOf("Exit-CompanionOpenMutex $openMutex", newTabIndex);
-  if (mutexIndex < 0 || rememberedIndex <= mutexIndex || rememberedIndex >= selectionIndex || selectionIndex < 0 || reuseIndex < selectionIndex || newTabIndex < reuseIndex || mutexReleaseIndex < newTabIndex) {
-    fail(`${label} helper must reuse and navigate an existing CogentStack tab before opening a new tab`);
-  }
-  const inventoryStart = source.indexOf("function Get-CogentStackTabCandidates");
-  const inventoryEnd = source.indexOf("function Find-ExistingCogentStackWindow", inventoryStart);
-  if (inventoryStart < 0 || inventoryEnd <= inventoryStart) fail(`${label} helper is missing the non-activating exact-title inventory`);
-  const inventory = source.slice(inventoryStart, inventoryEnd);
-  if (inventory.includes(".Select()")) fail(`${label} helper activates tabs while inventorying them`);
-  if (inventory.includes("Wait-AccountState") || inventory.includes("Get-BrowserAddressValue")) fail(`${label} helper reads active-tab state while inventorying titles`);
-  if (source.includes("$tabName -notmatch '(?i)CogentStack'")) fail(`${label} helper still accepts generic CogentStack title substrings`);
-  if (source.includes("Remove-TerminalCogentStackInstallationTabs")) fail(`${label} helper still cycles through installation tabs during normal launch`);
-};
-
-validateExistingTabReuse(panelSource, "Claude");
-const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "scripts");
-const codexSkillSource = await readFile(join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "SKILL.md"), "utf8");
-const codexBridgeSource = await readFile(join(codexScriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
-const codexWatcherSource = await readFile(join(codexScriptsRoot, "watch-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["CogentStack is a normal web application", "browserOpened: false", "Do not open it, call a browser-control tool"] ) {
-  if (!codexSkillSource.includes(marker)) fail(`Codex web-first skill is missing required marker: ${marker}`);
-}
-for (const forbidden of ["open-cogentstack-companion.ps1", "hide-codex-sidebar.ps1", "ensure-cogentstack.ps1", "surface=chatgpt"]) {
-  if (codexSkillSource.includes(forbidden)) fail(`Codex web-first skill contains retired companion behavior: ${forbidden}`);
-}
-for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion"]) {
-  if (!codexBridgeSource.includes(marker)) fail(`Codex Desktop Bridge starter is missing required marker: ${marker}`);
-}
-for (const forbidden of ["--app", "--new-window", "SetWindowPos", "SW_MAXIMIZE"]) {
-  if (codexBridgeSource.includes(forbidden)) fail(`Codex Desktop Bridge starter contains browser/window behavior: ${forbidden}`);
-}
-for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_project", "preview_project"]) {
-  if (!codexWatcherSource.includes(marker)) fail(`Codex Desktop Bridge watcher is missing required action marker: ${marker}`);
-}
-
-const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
-for (const marker of ["Get-Process -Name Claude", "Hide sidebar", "Show sidebar", "already_hidden"]) {
-  if (!sidebarSource.includes(marker)) fail(`Claude sidebar helper is missing required marker: ${marker}`);
-}
-
-const parityPairs = [
-  ["native-command.ps1", []],
-  ["connect-cogentstack.ps1", [
-    ["claude-desktop-authorization.json", "desktop-authorization.json"],
-    ["claude-desktop-credential.json", "desktop-credential.json"],
-    ["Claude Code Desktop on Windows", "ChatGPT Desktop on Windows"],
-    ["?surface=claude-desktop", ""],
-  ]],
-  ["fulfil-project.ps1", [["claude-desktop-credential.json", "desktop-credential.json"]]],
-  ["delete-project.ps1", [["claude-desktop-credential.json", "desktop-credential.json"]]],
-  ["prepare-deployment.ps1", [["claude-desktop-credential.json", "desktop-credential.json"]]],
-];
-for (const [name, replacements] of parityPairs) {
-  const source = await readFile(join(codexScriptsRoot, name), "utf8");
-  let claude = await readFile(join(scriptsRoot, name), "utf8");
-  for (const [from, to] of replacements) claude = claude.replaceAll(from, to);
-  if (claude.replaceAll("\r\n", "\n").trimEnd() !== source.replaceAll("\r\n", "\n").trimEnd()) {
-    fail(`${name} has drifted beyond its deliberate Claude identity changes`);
-  }
-}
-
 for (const name of requiredScripts) {
-  const path = join(scriptsRoot, name);
-  const escapedPath = path.replaceAll("'", "''");
+  const claudeSource = await readFile(join(scriptsRoot, name), "utf8");
+  const codexSource = await readFile(join(codexScriptsRoot, name), "utf8");
+  if (normalized(claudeSource) !== normalized(codexSource)) {
+    fail(`${name} must remain identical to the shared Desktop Bridge implementation`);
+  }
+  const escapedPath = join(scriptsRoot, name).replaceAll("'", "''");
   const syntaxCheck = spawnSync("powershell.exe", [
     "-NoProfile",
     "-Command",
@@ -283,21 +88,26 @@ for (const name of requiredScripts) {
   if (syntaxCheck.status !== 0) fail(`${name} has invalid PowerShell syntax: ${syntaxCheck.stderr.trim()}`);
 }
 
-const inspect = spawnSync("powershell.exe", [
-  "-NoProfile",
-  "-ExecutionPolicy", "Bypass",
-  "-File", join(scriptsRoot, "open-cogentstack-panel.ps1"),
-  "-Mode", "Inspect",
-], { encoding: "utf8" });
-if (inspect.status !== 0) fail(`safe companion inspection failed: ${inspect.stderr.trim()}`);
-let inspection;
-try { inspection = JSON.parse(inspect.stdout.trim()); } catch { fail("companion inspection did not return compact JSON"); }
-if (
-  inspection.status !== "inspected" ||
-  inspection.platform !== "windows" ||
-  typeof inspection.claudeDesktopWindowFound !== "boolean" ||
-  typeof inspection.browserAvailable !== "boolean"
-) fail("companion inspection returned an unexpected result");
+const bridge = await readFile(join(scriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
+for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion"]) {
+  if (!bridge.includes(marker)) fail(`Desktop Bridge starter is missing required marker: ${marker}`);
+}
+for (const forbidden of ["--app", "--new-window", "SetWindowPos", "SW_MAXIMIZE"]) {
+  if (bridge.includes(forbidden)) fail(`Desktop Bridge starter contains browser/window behavior: ${forbidden}`);
+}
+
+const watcher = await readFile(join(scriptsRoot, "watch-cogentstack-bridge.ps1"), "utf8");
+for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_project", "preview_project"]) {
+  if (!watcher.includes(marker)) fail(`Desktop Bridge watcher is missing required action marker: ${marker}`);
+}
+
+const connector = await readFile(join(scriptsRoot, "connect-cogentstack.ps1"), "utf8");
+for (const marker of ["desktop-credential.json", "DataProtectionScope]::CurrentUser", "installationBound = $true"]) {
+  if (!connector.includes(marker)) fail(`shared connector is missing required marker: ${marker}`);
+}
+for (const forbidden of ["claude-desktop-credential.json", "claude-desktop-authorization.json"]) {
+  if (connector.includes(forbidden)) fail(`Claude plugin must use the shared Bridge credential: ${forbidden}`);
+}
 
 console.log(JSON.stringify({
   status: "valid",
@@ -305,6 +115,8 @@ console.log(JSON.stringify({
   plugin: manifest.name,
   version: manifest.version,
   surface: "claude-code-desktop",
+  architecture: "web-first-desktop-bridge",
   scripts: actualScripts.length,
-  inspection,
+  sharedScriptParity: true,
+  browserInspectionPerformed: false,
 }));

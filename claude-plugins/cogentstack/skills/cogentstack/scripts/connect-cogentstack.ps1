@@ -18,8 +18,8 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
 
 $serviceUrl = 'https://cogentstack.app'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
-$pendingPath = Join-Path $stateRoot 'claude-desktop-authorization.json'
-$credentialPath = Join-Path $stateRoot 'claude-desktop-credential.json'
+$pendingPath = Join-Path $stateRoot 'desktop-authorization.json'
+$credentialPath = Join-Path $stateRoot 'desktop-credential.json'
 
 function Protect-CogentStackValue([string]$Value) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
@@ -164,7 +164,7 @@ if ($Mode -eq 'claim') {
             -Uri "$serviceUrl/api/plugin/bootstrap" `
             -ContentType 'application/json' `
             -Headers @{ Accept = 'application/json' } `
-            -Body (@{ code = $InstallationRequest; deviceName = 'Claude Code Desktop on Windows' } | ConvertTo-Json -Compress) `
+            -Body (@{ code = $InstallationRequest; deviceName = 'ChatGPT Desktop on Windows' } | ConvertTo-Json -Compress) `
             -TimeoutSec 20
     } finally {
         $InstallationRequest = ''
@@ -182,7 +182,7 @@ if ($Mode -eq 'claim') {
 }
 
 if ($Mode -eq 'start') {
-    $requestBody = @{ deviceName = 'Claude Code Desktop on Windows' } | ConvertTo-Json -Compress
+    $requestBody = @{ deviceName = 'ChatGPT Desktop on Windows' } | ConvertTo-Json -Compress
     $authorization = Invoke-RestMethod `
         -Method Post `
         -Uri "$serviceUrl/api/device-authorization" `
@@ -255,7 +255,7 @@ if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $res
 Save-CogentStackCredential $result
 Remove-Item -LiteralPath $pendingPath -Force
 
-$workspaceUrl = "$serviceUrl/stack?surface=claude-desktop#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
+$workspaceUrl = "$serviceUrl/stack#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
 Write-CompactJson ([ordered]@{
     status = 'authorized'
     email = [string]$result.subscriber.email

@@ -10,8 +10,8 @@
     {
       "name": "cogentstack",
       "source": "./claude-plugins/cogentstack",
-      "description": "Reuse one CogentStack workspace beside Claude Code Desktop, retire only completed installation tabs, and fulfil explicitly approved Contract Pack projects.",
-      "version": "0.2.7",
+      "description": "Connect each Claude Code Desktop project to its isolated CogentStack Web context through the shared Desktop Bridge without manipulating browser or application windows.",
+      "version": "0.3.0",
       "author": {
         "name": "CogentStack"
       },
@@ -20,7 +20,8 @@
       "category": "productivity",
       "keywords": [
         "cogentstack",
-        "claude-code",
+        "claude-code-desktop",
+        "desktop-bridge",
         "project-contracts",
         "project-types"
       ]
