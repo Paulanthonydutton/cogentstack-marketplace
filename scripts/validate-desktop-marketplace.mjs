@@ -1,10 +1,13 @@
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const manifestPath = join(repositoryRoot, "desktop", "marketplace.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+const installInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.md"), "utf8");
+const boundedInstaller = await readFile(join(repositoryRoot, ".agents", "plugins", "install-cogentstack.ps1"), "utf8");
+const sourcePluginPath = join(repositoryRoot, "plugins", "cogentstack");
 const semver = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 const sha256 = /^[a-f0-9]{64}$/;
 
@@ -43,6 +46,42 @@ if (windows.updaterSignature !== undefined && (
 if (windows.requiresUserApproval !== true) fail("Windows installation must retain user approval");
 if (windows.automaticLaunch !== false) fail("first installation must not claim to launch automatically");
 
+if (installInstructions.includes("https://raw.githubusercontent.com")) {
+  fail("the official Codex bootstrap must not require a shell-level raw installer download");
+}
+for (const requiredInstruction of [
+  "codex plugin marketplace list --json",
+  "codex plugin marketplace add",
+  "codex plugin marketplace upgrade cogentstack",
+  "-MarketplacePrepared",
+  "project-context.ps1",
+  "project-knowledge.ps1",
+]) {
+  if (!installInstructions.includes(requiredInstruction)) fail(`INSTALL.md is missing ${requiredInstruction}`);
+}
+for (const requiredInstallerMarker of [
+  "[switch]$MarketplacePrepared",
+  "prepared marketplace verification",
+  "The bounded installer is not running from the prepared CogentStack marketplace.",
+]) {
+  if (!boundedInstaller.includes(requiredInstallerMarker)) fail(`the bounded installer is missing ${requiredInstallerMarker}`);
+}
+if (boundedInstaller.includes("marketplace.marketplaceSource.source")) {
+  fail("the bounded installer must verify the registered checkout instead of relying on removed marketplace source metadata");
+}
+
+const allowlistBlock = boundedInstaller.match(/\$allowedFiles\s*=\s*@\(([\s\S]*?)\n\s*\)/);
+if (!allowlistBlock) fail("the bounded installer public-file allowlist could not be parsed");
+const allowedPluginFiles = [...allowlistBlock[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort();
+const pluginEntries = await readdir(sourcePluginPath, { recursive: true, withFileTypes: true });
+const actualPluginFiles = pluginEntries
+  .filter((entry) => entry.isFile())
+  .map((entry) => relative(sourcePluginPath, join(entry.parentPath, entry.name)).replaceAll("\\", "/"))
+  .sort();
+if (JSON.stringify(actualPluginFiles) !== JSON.stringify(allowedPluginFiles)) {
+  fail("the bounded installer allowlist does not exactly match the public plugin package");
+}
+
 console.log(JSON.stringify({
   status: "valid",
   application: manifest.application,
@@ -53,4 +92,6 @@ console.log(JSON.stringify({
   size: windows.installerSizeBytes,
   automaticUpdates: Boolean(windows.updaterSignature),
   automaticLaunch: windows.automaticLaunch,
+  installerBootstrap: "trusted-marketplace",
+  pluginFiles: actualPluginFiles.length,
 }));

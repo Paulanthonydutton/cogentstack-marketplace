@@ -6,6 +6,8 @@ param(
     [ValidateRange(5, 30)]
     [int]$DeadlineSeconds = 30,
 
+    [switch]$MarketplacePrepared,
+
     [switch]$ValidateOnly
 )
 
@@ -154,39 +156,55 @@ try {
         throw 'The CogentStack workspace is missing a required project-creation marker.'
     }
 
-    $stage = 'marketplace registration inspection'
-    $marketplace = Get-MarketplaceState
-    $registrationMatches = $false
-    if ($marketplace) {
-        $reportedSource = [string]$marketplace.marketplaceSource.source
-        if ($reportedSource -eq $marketplaceSource -and (Test-Path -LiteralPath ([string]$marketplace.root))) {
+    if ($MarketplacePrepared) {
+        $stage = 'prepared marketplace verification'
+        $marketplace = Get-MarketplaceState
+        if (-not $marketplace -or -not (Test-Path -LiteralPath ([string]$marketplace.root))) {
+            throw 'The prepared CogentStack marketplace registration is unavailable.'
+        }
+        $marketplaceRoot = (Resolve-Path -LiteralPath ([string]$marketplace.root) -ErrorAction Stop).Path.TrimEnd('\', '/')
+        $installerMarketplaceRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..') -ErrorAction Stop).Path.TrimEnd('\', '/')
+        if (-not [string]::Equals($marketplaceRoot, $installerMarketplaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The bounded installer is not running from the prepared CogentStack marketplace.'
+        }
+        $preparedRemote = Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'remote', 'get-url', 'origin')
+        $preparedSparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'sparse-checkout', 'list')) -split "`r?`n" | Where-Object { $_ })
+        if ($preparedRemote.Trim() -ne $marketplaceSource -or -not (Test-StringSetEqual -Actual $preparedSparse -Expected $requiredSparsePaths)) {
+            throw 'The prepared CogentStack marketplace does not match the official Git source and sparse paths.'
+        }
+    } else {
+        $stage = 'marketplace registration inspection'
+        $marketplace = Get-MarketplaceState
+        $registrationMatches = $false
+        if ($marketplace -and (Test-Path -LiteralPath ([string]$marketplace.root))) {
             $root = [string]$marketplace.root
             $remote = Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $root, 'remote', 'get-url', 'origin')
             $sparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $root, 'sparse-checkout', 'list')) -split "`r?`n" | Where-Object { $_ })
             $registrationMatches = $remote.Trim() -eq $marketplaceSource -and (Test-StringSetEqual -Actual $sparse -Expected $requiredSparsePaths)
         }
-    }
 
-    $stage = 'marketplace registration repair'
-    if ($marketplace -and -not $registrationMatches) {
-        [void](Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'marketplace', 'remove', $marketplaceName, '--json'))
-        Add-CogentStackMarketplace
-    } elseif (-not $marketplace) {
-        Add-CogentStackMarketplace
-    }
+        $stage = 'marketplace registration repair'
+        if ($marketplace -and -not $registrationMatches) {
+            [void](Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'marketplace', 'remove', $marketplaceName, '--json'))
+            Add-CogentStackMarketplace
+        } elseif (-not $marketplace) {
+            Add-CogentStackMarketplace
+        }
 
-    $stage = 'marketplace refresh'
-    [void](Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'marketplace', 'upgrade', $marketplaceName))
+        $stage = 'marketplace refresh'
+        [void](Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'marketplace', 'upgrade', $marketplaceName))
 
-    $stage = 'refreshed marketplace verification'
-    $marketplace = Get-MarketplaceState
-    if (-not $marketplace -or [string]$marketplace.marketplaceSource.source -ne $marketplaceSource) {
-        throw 'The refreshed CogentStack marketplace registration is unavailable or has the wrong Git source.'
-    }
-    $marketplaceRoot = [string]$marketplace.root
-    $refreshedSparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'sparse-checkout', 'list')) -split "`r?`n" | Where-Object { $_ })
-    if (-not (Test-StringSetEqual -Actual $refreshedSparse -Expected $requiredSparsePaths)) {
-        throw 'The refreshed CogentStack marketplace does not contain the two required sparse paths.'
+        $stage = 'refreshed marketplace verification'
+        $marketplace = Get-MarketplaceState
+        if (-not $marketplace -or -not (Test-Path -LiteralPath ([string]$marketplace.root))) {
+            throw 'The refreshed CogentStack marketplace registration is unavailable.'
+        }
+        $marketplaceRoot = [string]$marketplace.root
+        $refreshedRemote = Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'remote', 'get-url', 'origin')
+        $refreshedSparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'sparse-checkout', 'list')) -split "`r?`n" | Where-Object { $_ })
+        if ($refreshedRemote.Trim() -ne $marketplaceSource -or -not (Test-StringSetEqual -Actual $refreshedSparse -Expected $requiredSparsePaths)) {
+            throw 'The refreshed CogentStack marketplace does not match the official Git source and sparse paths.'
+        }
     }
 
     $stage = 'plugin installation'
@@ -229,6 +247,8 @@ try {
         'skills/cogentstack/scripts/native-command.ps1',
         'skills/cogentstack/scripts/open-cogentstack-companion.ps1',
         'skills/cogentstack/scripts/prepare-deployment.ps1',
+        'skills/cogentstack/scripts/project-context.ps1',
+        'skills/cogentstack/scripts/project-knowledge.ps1',
         'skills/cogentstack/SKILL.md'
     )
     $actualFiles = @(Get-ChildItem -LiteralPath $installedPath -Recurse -Force -File | ForEach-Object {
