@@ -442,30 +442,6 @@ function Resolve-ChatProjectForOpen($VisibleProject, $HostProjectContext, [strin
     }
 }
 
-function Resolve-WatcherChatProject($ActiveProject, $WatchState) {
-    if ($ActiveProject.resolved) { return $ActiveProject }
-    $stableContextAuthoritative = [bool](
-        $WatchState -and
-        $WatchState.PSObject.Properties['chatProjectStableContextFallback'] -and
-        [bool]$WatchState.chatProjectStableContextFallback -and
-        $WatchState.PSObject.Properties['contextKey'] -and
-        [string]$WatchState.contextKey -match '^ctx-[0-9a-f]{64}$'
-    )
-    if (-not $stableContextAuthoritative) { return $ActiveProject }
-    $rememberedProjectKey = if ($WatchState.PSObject.Properties['chatProjectKey']) {
-        [string]$WatchState.chatProjectKey
-    } else {
-        Get-StableChatProjectKeyFromContext ([string]$WatchState.contextKey)
-    }
-    if (-not $rememberedProjectKey) { return $ActiveProject }
-    return [ordered]@{
-        resolved = $true
-        key = $rememberedProjectKey
-        source = 'stable-project-context-watcher'
-        attempts = if ($ActiveProject.Contains('attempts')) { [int]$ActiveProject.attempts } else { 1 }
-    }
-}
-
 function Save-ContextBinding([string]$ProjectKey, [string]$ContextKey, [string]$WorkspaceUrl) {
     if (-not $ProjectKey) { throw 'The active ChatGPT Project identity is unavailable.' }
     $safeWorkspaceUrl = Confirm-CogentStackUrl $WorkspaceUrl
@@ -1994,14 +1970,14 @@ if ($Mode -eq 'CreateProjectWorker') {
         $ownsCreationMutex = $creationMutex.WaitOne(0)
         if (-not $ownsCreationMutex) { exit 0 }
         $created = Invoke-ApprovedProjectCreation $RequestId $ContextKey
-        $workerState = Read-LayoutState
-        $workerPanel = if ($workerState) { Find-RememberedWindow $workerState 'panel' } else { $null }
-        if ($workerState -and $workerPanel) {
-            $returnUrl = [string]$workerState.workspaceUrl
-            if (-not $created) {
+        if (-not $created) {
+            $workerState = Read-LayoutState
+            $workerPanel = if ($workerState) { Find-RememberedWindow $workerState 'panel' } else { $null }
+            if ($workerState -and $workerPanel) {
+                $returnUrl = [string]$workerState.workspaceUrl
                 $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_creation=failed&desktop_request=$RequestId"
+                Set-BrowserWorkspaceAddress $workerPanel $returnUrl | Out-Null
             }
-            Set-BrowserWorkspaceAddress $workerPanel $returnUrl | Out-Null
         }
         exit $(if ($created) { 0 } else { 1 })
     } finally {
@@ -2015,6 +1991,7 @@ if ($Mode -eq 'WatchExit') {
     $ownsMutex = $false
     $pendingProjectKey = $null
     $pendingProjectCount = 0
+    $handledCreationRequests = New-Object 'System.Collections.Generic.HashSet[string]'
     try {
         $ownsMutex = $watcherMutex.WaitOne(0)
         if (-not $ownsMutex) { exit 0 }
@@ -2030,14 +2007,14 @@ if ($Mode -eq 'WatchExit') {
             }
             $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
             $watchChat = Find-RememberedWindow $watchState 'chatDesktop'
-            $activeProject = Resolve-WatcherChatProject (Get-ActiveChatProject $watchChat) $watchState
+            $activeProject = Get-ActiveChatProject $watchChat
             $rememberedProjectKey = if ($watchState.PSObject.Properties['chatProjectKey']) { [string]$watchState.chatProjectKey } else { '' }
             if (-not $activeProject.resolved) {
                 if ($pendingProjectKey -eq 'unresolved') { $pendingProjectCount++ } else {
                     $pendingProjectKey = 'unresolved'
                     $pendingProjectCount = 1
                 }
-                if ($pendingProjectCount -lt 20) {
+                if ($pendingProjectCount -lt 4) {
                     Start-Sleep -Milliseconds 250
                     continue
                 }
@@ -2071,54 +2048,9 @@ if ($Mode -eq 'WatchExit') {
             }
             $observedProjectKey = [string]$activeProject.key
             if ($observedProjectKey -ne $rememberedProjectKey) {
-                if ($pendingProjectKey -eq $observedProjectKey) { $pendingProjectCount++ } else {
-                    $pendingProjectKey = $observedProjectKey
-                    $pendingProjectCount = 1
-                }
-                if ($pendingProjectCount -lt 4) {
-                    Start-Sleep -Milliseconds 250
-                    continue
-                }
-                $binding = if ($activeProject.resolved) { Find-ContextBinding ([string]$activeProject.key) } else { $null }
-                if (-not $binding) {
-                    if ($layoutStatus -eq 'active') {
-                        Suspend-CompanionLayout $watchState $false 'inactive-project' $true | Out-Null
-                    }
-                    Start-Sleep -Milliseconds 250
-                    continue
-                }
-                try {
-                    $boundUrl = Confirm-CogentStackUrl ([string]$binding.workspaceUrl)
-                    $boundContextKey = Get-CogentStackContextFromUrl $boundUrl
-                    if ($boundContextKey -ne [string]$binding.contextKey) { throw 'binding mismatch' }
-                } catch {
-                    if ($layoutStatus -eq 'active') {
-                        Suspend-CompanionLayout $watchState $false 'inactive-project' $true | Out-Null
-                    }
-                    Start-Sleep -Milliseconds 250
-                    continue
-                }
                 if ($layoutStatus -eq 'active') {
-                    Suspend-CompanionLayout $watchState $false 'context-switch' $true | Out-Null
+                    Suspend-CompanionLayout $watchState $false 'inactive-project' $true | Out-Null
                 }
-                $watchState | Add-Member -MemberType NoteProperty -Name chatProjectKey -Value ([string]$activeProject.key) -Force
-                $watchState | Add-Member -MemberType NoteProperty -Name contextKey -Value $boundContextKey -Force
-                $watchState | Add-Member -MemberType NoteProperty -Name workspaceUrl -Value $boundUrl -Force
-                $watchState | Add-Member -MemberType NoteProperty -Name suspendReason -Value 'context-switch' -Force
-                Save-LayoutState $watchState
-                $watchAddress = Get-BrowserAddressValue $watchPanel
-                $addressMatchesBinding = $false
-                try {
-                    $addressMatchesBinding = (Test-CogentStackWorkspaceAddress $watchAddress) -and
-                        (Get-CogentStackContextFromUrl $watchAddress) -eq $boundContextKey
-                } catch { $addressMatchesBinding = $false }
-                if (-not $addressMatchesBinding -and -not (Set-BrowserWorkspaceAddress $watchPanel $boundUrl)) {
-                    Start-Sleep -Milliseconds 250
-                    continue
-                }
-                Resume-CompanionLayout $watchState | Out-Null
-                $pendingProjectKey = $null
-                $pendingProjectCount = 0
                 Start-Sleep -Milliseconds 250
                 continue
             }
@@ -2132,12 +2064,14 @@ if ($Mode -eq 'WatchExit') {
             }
             $watchAddress = Get-BrowserAddressValue $watchPanel
             $creationRequestId = Get-CompanionProjectCreationRequestId $watchAddress
-            if ($creationRequestId) {
+            if ($creationRequestId -and $handledCreationRequests.Add($creationRequestId)) {
                 $watchContextKey = if ($watchState.PSObject.Properties['contextKey']) { [string]$watchState.contextKey } else { 'default' }
                 $creationStarted = Start-ApprovedProjectCreationWorker $creationRequestId $watchContextKey
-                $returnUrl = [string]$watchState.workspaceUrl
-                $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_creation=$(if ($creationStarted) { 'started' } else { 'failed' })&desktop_request=$creationRequestId"
-                Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
+                if (-not $creationStarted) {
+                    $returnUrl = [string]$watchState.workspaceUrl
+                    $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_creation=failed&desktop_request=$creationRequestId"
+                    Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
+                }
                 Start-Sleep -Milliseconds 500
                 continue
             }

@@ -279,14 +279,13 @@ for (const marker of [
   "function Resolve-ChatProjectForOpen",
   "stable-project-context",
   "project_context_conflict",
-  "$stableContextAuthoritative",
   "remembered-context-binding",
   "projectDetectionAttempts",
   "chatgpt_project_unresolved",
   "chatgpt-companion-contexts.json",
   "Find-ContextBinding",
   "Suspend-CompanionLayout $watchState $false 'inactive-project' $true",
-  "$pendingProjectCount -lt 20",
+  "$pendingProjectCount -lt 4",
   "chatProjectVisualBindingPending",
   "accessibility-late-binding",
   "Save-ContextBinding ([string]$activeChatProject.key) $requestedContextKey $safeUrl",
@@ -297,9 +296,10 @@ for (const marker of [
   if (!codexCompanionSource.includes(marker)) fail(`Codex companion helper is missing navigation recovery marker: ${marker}`);
 }
 if (codexCompanionSource.includes("TopMost = `$true")) fail("Codex divider must not be globally topmost");
+if (codexCompanionSource.includes("Resolve-WatcherChatProject")) fail("Codex watcher must not substitute a remembered Project when the visible Project is unresolved");
 const codexWatchAddressIndex = codexCompanionSource.indexOf("$watchAddress = Get-BrowserAddressValue $watchPanel");
 const codexCloseIndex = codexCompanionSource.indexOf("if (Test-CompanionExitAddress $watchAddress)", codexWatchAddressIndex);
-const codexProjectIndex = codexCompanionSource.indexOf("$activeProject = Resolve-WatcherChatProject", codexCloseIndex);
+const codexProjectIndex = codexCompanionSource.indexOf("$activeProject = Get-ActiveChatProject $watchChat", codexCloseIndex);
 const codexCreationIndex = codexCompanionSource.indexOf("$creationRequestId = Get-CompanionProjectCreationRequestId", codexProjectIndex);
 const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexCreationIndex);
 if (
@@ -311,6 +311,17 @@ if (
 ) {
   fail("Codex companion must restore on close before optional Project resolution, then process creation and deletion only after Project isolation");
 }
+const projectMismatchStart = codexCompanionSource.indexOf("if ($observedProjectKey -ne $rememberedProjectKey)");
+const projectMismatchEnd = codexCompanionSource.indexOf("$pendingProjectKey = $null", projectMismatchStart);
+const projectMismatchBranch = codexCompanionSource.slice(projectMismatchStart, projectMismatchEnd);
+if (projectMismatchStart < 0 || projectMismatchEnd <= projectMismatchStart) fail("Codex companion is missing its Project-mismatch isolation branch");
+if (!projectMismatchBranch.includes("Suspend-CompanionLayout $watchState $false 'inactive-project' $true")) fail("Codex companion must suspend when another ChatGPT Project becomes visible");
+for (const forbidden of ["Find-ContextBinding", "context-switch", "-Name chatProjectKey", "-Name contextKey", "-Name workspaceUrl"]) {
+  if (projectMismatchBranch.includes(forbidden)) fail(`Codex companion must not switch its running session to another Project: ${forbidden}`);
+}
+if (!codexCompanionSource.includes("$handledCreationRequests.Add($creationRequestId)")) fail("Codex companion must start each approved creation request once");
+if (!codexCompanionSource.includes("if (-not $creationStarted)")) fail("Codex companion may navigate only to expose a worker-start failure");
+if (codexCompanionSource.includes("desktop_creation=$(if ($creationStarted)")) fail("Codex companion must not refresh the creation form after starting its worker");
 
 const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
 for (const marker of ["Get-Process -Name Claude", "Hide sidebar", "Show sidebar", "already_hidden"]) {
