@@ -7,6 +7,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'project-context.ps1')
+
 function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Compress | Write-Output
 }
@@ -277,6 +279,11 @@ function Get-StableChatProjectKey([string]$ProjectName) {
     }
 }
 
+function Get-StableChatProjectKeyFromContext([string]$ContextKey) {
+    if ($ContextKey -notmatch '^ctx-([0-9a-f]{64})$') { return $null }
+    return 'chat-context-' + $Matches[1]
+}
+
 function Get-ActiveChatProject($ChatWindow) {
     if (-not $ChatWindow -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$ChatWindow.Handle)) {
         return [ordered]@{ resolved = $false; reason = 'chat_window_unavailable' }
@@ -306,10 +313,25 @@ function Get-ActiveChatProject($ChatWindow) {
         return [ordered]@{
             resolved = $true
             key = Get-StableChatProjectKey $projectNames[0]
+            source = 'accessibility'
         }
     } catch {
         return [ordered]@{ resolved = $false; reason = 'project_accessibility_unavailable' }
     }
+}
+
+function Wait-ActiveChatProject($ChatWindow, [int]$Attempts = 16, [int]$DelayMilliseconds = 250) {
+    $lastResult = [ordered]@{ resolved = $false; reason = 'no_active_project' }
+    for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
+        $lastResult = Get-ActiveChatProject $ChatWindow
+        if ($lastResult.resolved) {
+            $lastResult['attempts'] = $attempt + 1
+            return $lastResult
+        }
+        if ($attempt + 1 -lt $Attempts) { Start-Sleep -Milliseconds $DelayMilliseconds }
+    }
+    $lastResult['attempts'] = $Attempts
+    return $lastResult
 }
 
 function Read-ContextBindings {
@@ -332,6 +354,58 @@ function Find-ContextBinding([string]$ProjectKey) {
         $_.PSObject.Properties['projectKey'] -and [string]$_.projectKey -eq $ProjectKey -and
         $_.PSObject.Properties['workspaceUrl'] -and $_.PSObject.Properties['contextKey']
     } | Select-Object -First 1)
+}
+
+function Find-ContextBindingByContext([string]$ContextKey) {
+    if (-not $ContextKey) { return $null }
+    $registry = Read-ContextBindings
+    @($registry.bindings | Where-Object {
+        $_.PSObject.Properties['projectKey'] -and
+        $_.PSObject.Properties['workspaceUrl'] -and
+        $_.PSObject.Properties['contextKey'] -and
+        [string]$_.contextKey -eq $ContextKey
+    } | Sort-Object @{ Expression = {
+        if ($_.PSObject.Properties['updatedAt']) { [string]$_.updatedAt } else { '' }
+    }; Descending = $true } | Select-Object -First 1)
+}
+
+function Resolve-ChatProjectForOpen($VisibleProject, $HostProjectContext, [string]$RequestedContextKey, $RememberedContextBinding) {
+    if ($VisibleProject.resolved) {
+        return [pscustomobject][ordered]@{
+            project = $VisibleProject
+            stableContextFallbackUsed = $false
+            stableContextBindingPending = $false
+        }
+    }
+    if (-not [bool]$HostProjectContext.Isolated -or [string]$HostProjectContext.ContextKey -ne $RequestedContextKey) {
+        return [pscustomobject][ordered]@{
+            project = $VisibleProject
+            stableContextFallbackUsed = $false
+            stableContextBindingPending = $false
+        }
+    }
+    $fallbackProjectKey = if ($RememberedContextBinding) {
+        [string]$RememberedContextBinding.projectKey
+    } else {
+        Get-StableChatProjectKeyFromContext $RequestedContextKey
+    }
+    if (-not $fallbackProjectKey) {
+        return [pscustomobject][ordered]@{
+            project = $VisibleProject
+            stableContextFallbackUsed = $false
+            stableContextBindingPending = $false
+        }
+    }
+    return [pscustomobject][ordered]@{
+        project = [ordered]@{
+            resolved = $true
+            key = $fallbackProjectKey
+            source = if ($RememberedContextBinding) { 'remembered-context-binding' } else { 'stable-project-context' }
+            attempts = if ($VisibleProject.Contains('attempts')) { [int]$VisibleProject.attempts } else { 1 }
+        }
+        stableContextFallbackUsed = $true
+        stableContextBindingPending = -not [bool]$RememberedContextBinding
+    }
 }
 
 function Save-ContextBinding([string]$ProjectKey, [string]$ContextKey, [string]$WorkspaceUrl) {
@@ -1759,7 +1833,12 @@ function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter, $Di
 $state = Read-LayoutState
 $browsers = @(Get-CompanionBrowsers)
 $chatDesktopWindow = @(Get-ChatDesktopWindow | Select-Object -First 1)
-$activeChatProject = Get-ActiveChatProject $chatDesktopWindow
+$hostProjectContext = Get-CogentStackProjectContext
+$activeChatProject = if ($Mode -eq 'Open') {
+    Wait-ActiveChatProject $chatDesktopWindow
+} else {
+    Get-ActiveChatProject $chatDesktopWindow
+}
 
 if ($Mode -eq 'InstallToggle') {
     $shortcut = Install-WorkModeShortcut
@@ -1803,7 +1882,44 @@ if ($Mode -eq 'WatchExit') {
             $watchChat = Find-RememberedWindow $watchState 'chatDesktop'
             $activeProject = Get-ActiveChatProject $watchChat
             $rememberedProjectKey = if ($watchState.PSObject.Properties['chatProjectKey']) { [string]$watchState.chatProjectKey } else { '' }
-            $observedProjectKey = if ($activeProject.resolved) { [string]$activeProject.key } else { 'unresolved' }
+            if (-not $activeProject.resolved) {
+                if ($pendingProjectKey -eq 'unresolved') { $pendingProjectCount++ } else {
+                    $pendingProjectKey = 'unresolved'
+                    $pendingProjectCount = 1
+                }
+                if ($pendingProjectCount -lt 20) {
+                    Start-Sleep -Milliseconds 250
+                    continue
+                }
+                if ($layoutStatus -eq 'active') {
+                    Suspend-CompanionLayout $watchState $false 'inactive-project' $true | Out-Null
+                }
+                Start-Sleep -Milliseconds 250
+                continue
+            }
+            $visualBindingPending = [bool](
+                $watchState.PSObject.Properties['chatProjectVisualBindingPending'] -and
+                [bool]$watchState.chatProjectVisualBindingPending
+            )
+            if ($visualBindingPending) {
+                $bindingDeadline = [DateTimeOffset]::MinValue
+                $deadlineValid = $watchState.PSObject.Properties['chatProjectVisualBindingDeadlineUtc'] -and
+                    [DateTimeOffset]::TryParse([string]$watchState.chatProjectVisualBindingDeadlineUtc, [ref]$bindingDeadline)
+                $existingVisualBinding = Find-ContextBinding ([string]$activeProject.key)
+                if ($deadlineValid -and [DateTimeOffset]::UtcNow -le $bindingDeadline -and -not $existingVisualBinding) {
+                    Save-ContextBinding ([string]$activeProject.key) ([string]$watchState.contextKey) ([string]$watchState.workspaceUrl)
+                    $watchState | Add-Member -MemberType NoteProperty -Name chatProjectKey -Value ([string]$activeProject.key) -Force
+                    $watchState | Add-Member -MemberType NoteProperty -Name chatProjectIdentitySource -Value 'accessibility-late-binding' -Force
+                    $watchState | Add-Member -MemberType NoteProperty -Name chatProjectVisualBindingPending -Value $false -Force
+                    $watchState | Add-Member -MemberType NoteProperty -Name updatedAt -Value ([DateTimeOffset]::UtcNow.ToString('O')) -Force
+                    Save-LayoutState $watchState
+                    $rememberedProjectKey = [string]$activeProject.key
+                } else {
+                    $watchState | Add-Member -MemberType NoteProperty -Name chatProjectVisualBindingPending -Value $false -Force
+                    Save-LayoutState $watchState
+                }
+            }
+            $observedProjectKey = [string]$activeProject.key
             if ($observedProjectKey -ne $rememberedProjectKey) {
                 if ($pendingProjectKey -eq $observedProjectKey) { $pendingProjectCount++ } else {
                     $pendingProjectKey = $observedProjectKey
@@ -2004,11 +2120,21 @@ if ($Mode -eq 'Close') {
 
 $safeUrl = Confirm-CogentStackUrl $Url
 $requestedContextKey = Get-CogentStackContextFromUrl $safeUrl
+$rememberedContextBinding = if ([bool]$hostProjectContext.Isolated -and [string]$hostProjectContext.ContextKey -eq $requestedContextKey) {
+    Find-ContextBindingByContext $requestedContextKey
+} else { $null }
+$openProjectResolution = Resolve-ChatProjectForOpen $activeChatProject $hostProjectContext $requestedContextKey $rememberedContextBinding
+$activeChatProject = $openProjectResolution.project
+$stableContextFallbackUsed = [bool]$openProjectResolution.stableContextFallbackUsed
+$stableContextBindingPending = [bool]$openProjectResolution.stableContextBindingPending
 if (-not $activeChatProject.resolved) {
     Write-CompactJson ([ordered]@{
         status = 'chatgpt_project_unresolved'
-        message = 'CogentStack was not opened because one active ChatGPT Project could not be identified safely.'
+        message = 'CogentStack was not opened because neither a stable ChatGPT Project context nor one active Project accessibility identity could be verified.'
         reason = [string]$activeChatProject.reason
+        contextSource = [string]$hostProjectContext.Source
+        contextIsolated = [bool]$hostProjectContext.Isolated
+        projectDetectionAttempts = if ($activeChatProject.Contains('attempts')) { [int]$activeChatProject.attempts } else { 1 }
         openedNewTab = $false
     })
     exit 2
@@ -2229,7 +2355,7 @@ $headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
 $layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 $layoutState = [pscustomobject][ordered]@{
-    schemaVersion = 13
+    schemaVersion = 14
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
@@ -2257,6 +2383,10 @@ $layoutState = [pscustomobject][ordered]@{
     workspaceUrl = $safeUrl
     contextKey = $requestedContextKey
     chatProjectKey = [string]$activeChatProject.key
+    chatProjectIdentitySource = if ($activeChatProject.Contains('source')) { [string]$activeChatProject.source } else { 'accessibility' }
+    chatProjectStableContextFallback = $stableContextFallbackUsed
+    chatProjectVisualBindingPending = $stableContextBindingPending
+    chatProjectVisualBindingDeadlineUtc = if ($stableContextBindingPending) { [DateTimeOffset]::UtcNow.AddSeconds(30).ToString('O') } else { $null }
     suspendReason = 'none'
     layoutStatus = 'active'
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
@@ -2320,6 +2450,8 @@ Write-CompactJson ([ordered]@{
     accountState = [string]$panelSelection.AccountState
     contextKey = $requestedContextKey
     chatProjectBound = $true
+    chatProjectIdentitySource = if ($activeChatProject.Contains('source')) { [string]$activeChatProject.source } else { 'accessibility' }
+    chatProjectStableContextFallback = $stableContextFallbackUsed
     chatFrame = $layout.chat
     panelFrame = $layout.panel
     browserWindowFrame = $pageOnly.windowFrame
