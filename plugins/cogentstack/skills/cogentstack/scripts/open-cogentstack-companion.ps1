@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'Suspend', 'Resume', 'Toggle', 'InstallToggle', 'WatchExit', 'CreateProjectWorker', 'PreviewProjectWorker')]
+    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'Suspend', 'Resume', 'Toggle', 'InstallToggle', 'PrepareRuntime', 'WatchExit', 'CreateProjectWorker', 'PreviewProjectWorker')]
     [string]$Mode = 'Open',
     [string]$Url = 'https://cogentstack.app/stack?surface=chatgpt',
     [string]$RequestId = '',
@@ -897,6 +897,17 @@ function Test-CompanionProjectDeletionAddress([string]$Address) {
     return $null -ne $parsed -and
         $parsed.AbsolutePath.TrimEnd('/') -eq '/stack' -and
         $parsed.Query -match '(?i)(?:^|[?&])desktop_action=delete_project(?:&|$)'
+}
+
+function Get-CompanionProjectDeletionRequestId([string]$Address) {
+    $parsed = ConvertTo-CogentStackUri $Address
+    if ($null -eq $parsed -or $parsed.AbsolutePath.TrimEnd('/') -ne '/stack' -or
+        $parsed.Query -notmatch '(?i)(?:^|[?&])desktop_action=delete_project(?:&|$)') {
+        return ''
+    }
+    $requestMatch = [regex]::Match($parsed.Query, '(?i)(?:^|[?&])desktop_request=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:&|$)')
+    if (-not $requestMatch.Success) { return '' }
+    return $requestMatch.Groups[1].Value.ToLowerInvariant()
 }
 
 function Get-CompanionProjectCreationRequestId([string]$Address) {
@@ -1803,16 +1814,61 @@ function Start-CompanionExitWatcher {
     $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     $powershellPath = if ($powershellCommand) { [string]$powershellCommand.Source } else { $null }
     if (-not $powershellPath) { throw 'Windows PowerShell is required to monitor the CogentStack companion exit control.' }
+    $watcherScript = Install-CompanionRuntimeSnapshot
     Start-Process -FilePath $powershellPath -ArgumentList @(
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy',
         'Bypass',
         '-File',
-        $PSCommandPath,
+        $watcherScript,
         '-Mode',
         'WatchExit'
     ) -WindowStyle Hidden -PassThru
+}
+
+function Install-CompanionRuntimeSnapshot {
+    $sourceScript = [IO.Path]::GetFullPath($PSCommandPath)
+    $sourceDirectory = [IO.Path]::GetFullPath($PSScriptRoot)
+    $runtimeRoot = Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack') 'companion-runtime'
+    $contentHash = (Get-FileHash -LiteralPath $sourceScript -Algorithm SHA256).Hash.ToLowerInvariant()
+    $runtimeDirectory = Join-Path $runtimeRoot $contentHash
+    $runtimeScript = Join-Path $runtimeDirectory ([IO.Path]::GetFileName($sourceScript))
+    $requiredScripts = @(
+        'open-cogentstack-companion.ps1',
+        'project-context.ps1',
+        'delete-project.ps1',
+        'fulfil-project.ps1',
+        'generate-project-preview.ps1'
+    )
+    $snapshotReady = (Test-Path -LiteralPath $runtimeScript -PathType Leaf) -and
+        -not @($requiredScripts | Where-Object { -not (Test-Path -LiteralPath (Join-Path $runtimeDirectory $_) -PathType Leaf) }).Count
+    if ($snapshotReady) { return $runtimeScript }
+
+    New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
+    $stagingDirectory = Join-Path $runtimeRoot (".$contentHash-$([Guid]::NewGuid().ToString('N'))")
+    New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
+    try {
+        Get-ChildItem -LiteralPath $sourceDirectory -File | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stagingDirectory $_.Name) -Force
+        }
+        foreach ($requiredScript in $requiredScripts) {
+            if (-not (Test-Path -LiteralPath (Join-Path $stagingDirectory $requiredScript) -PathType Leaf)) {
+                throw "The companion runtime snapshot is missing $requiredScript."
+            }
+        }
+        if (-not (Test-Path -LiteralPath $runtimeDirectory)) {
+            Move-Item -LiteralPath $stagingDirectory -Destination $runtimeDirectory
+        }
+    } finally {
+        if (Test-Path -LiteralPath $stagingDirectory) {
+            Remove-Item -LiteralPath $stagingDirectory -Recurse -Force
+        }
+    }
+    if (-not (Test-Path -LiteralPath $runtimeScript -PathType Leaf)) {
+        throw 'The immutable companion runtime snapshot could not be prepared.'
+    }
+    return $runtimeScript
 }
 
 function Start-ApprovedProjectCreationWorker([string]$ApprovedRequestId, [string]$ApprovedContextKey) {
@@ -1867,13 +1923,13 @@ function Start-ActiveProjectPreviewWorker([string]$PreviewRequestId, [string]$Pr
     }
 }
 
-function Invoke-ApprovedProjectDeletion([string]$ContextKey = 'default') {
+function Invoke-ApprovedProjectDeletion([string]$ContextKey = 'default', [string]$ApprovedRequestId = '') {
     $deleteScript = Join-Path $PSScriptRoot 'delete-project.ps1'
     if (-not (Test-Path -LiteralPath $deleteScript -PathType Leaf)) { return $false }
     $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $powershellCommand) { return $false }
     try {
-        $process = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
+        $arguments = @(
             '-NoProfile',
             '-NonInteractive',
             '-ExecutionPolicy',
@@ -1884,7 +1940,11 @@ function Invoke-ApprovedProjectDeletion([string]$ContextKey = 'default') {
             'delete',
             '-ContextKey',
             $ContextKey
-        ) -WindowStyle Hidden -Wait -PassThru
+        )
+        if ($ApprovedRequestId -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+            $arguments += @('-RequestId', $ApprovedRequestId)
+        }
+        $process = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru
         return $process.ExitCode -eq 0
     } catch {
         return $false
@@ -2005,6 +2065,12 @@ function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter, $Di
         panel = $panel
         divider = $divider
     }
+}
+
+if ($Mode -eq 'PrepareRuntime') {
+    $runtimeScript = Install-CompanionRuntimeSnapshot
+    Write-CompactJson ([ordered]@{ status = 'ready'; runtimeScript = $runtimeScript; sourceIndependent = $runtimeScript -ne [IO.Path]::GetFullPath($PSCommandPath) })
+    exit 0
 }
 
 $state = Read-LayoutState
@@ -2218,7 +2284,8 @@ if ($Mode -eq 'WatchExit') {
             }
             $watchAddress = Get-BrowserAddressValue $watchPanel
             if (Test-CompanionProjectDeletionAddress $watchAddress) {
-                $deleted = Invoke-ApprovedProjectDeletion $watchContextKey
+                $deletionRequestId = Get-CompanionProjectDeletionRequestId $watchAddress
+                $deleted = Invoke-ApprovedProjectDeletion $watchContextKey $deletionRequestId
                 $returnUrl = [string]$watchState.workspaceUrl
                 if (-not $deleted) {
                     $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_deletion=failed"
