@@ -180,6 +180,9 @@ public static class CogentStackWorkspaceWindows {
     [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
     public static extern IntPtr SetWindowLong32(IntPtr hWnd, int index, IntPtr value);
 
+    [DllImport("kernel32.dll")]
+    public static extern void SetLastError(uint errorCode);
+
     [DllImport("user32.dll")]
     public static extern int GetWindowTextLength(IntPtr hWnd);
 
@@ -246,14 +249,112 @@ public static class CogentStackWorkspaceWindows {
         if (IntPtr.Size == 8) SetWindowLongPtr64(hWnd, -16, new IntPtr(value));
         else SetWindowLong32(hWnd, -16, new IntPtr(value));
     }
+
+    public static bool SetWindowOwner(IntPtr hWnd, IntPtr owner) {
+        SetLastError(0);
+        IntPtr previous = IntPtr.Size == 8 ? SetWindowLongPtr64(hWnd, -8, owner) : SetWindowLong32(hWnd, -8, owner);
+        return previous != IntPtr.Zero || Marshal.GetLastWin32Error() == 0;
+    }
 }
 '@
 }
 
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
 $statePath = Join-Path $stateRoot 'chatgpt-companion-layout.json'
+$bindingPath = Join-Path $stateRoot 'chatgpt-companion-contexts.json'
 $backdropTitle = 'CogentStack Workspace Backdrop'
 $dividerTitle = 'CogentStack Workspace Divider'
+
+function Get-StableChatProjectKey([string]$ProjectName) {
+    $normalized = $ProjectName.Trim().Normalize([Text.NormalizationForm]::FormKC).ToLowerInvariant()
+    if (-not $normalized) { return $null }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($normalized)
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        return 'chat-project-' + ([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $hash.Dispose()
+    }
+}
+
+function Get-ActiveChatProject($ChatWindow) {
+    if (-not $ChatWindow -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$ChatWindow.Handle)) {
+        return [ordered]@{ resolved = $false; reason = 'chat_window_unavailable' }
+    }
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$ChatWindow.Handle)
+        $buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button
+        )
+        $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)
+        $projectNames = @()
+        foreach ($button in $buttons) {
+            if ([bool]$button.Current.IsOffscreen) { continue }
+            $rectangle = $button.Current.BoundingRectangle
+            if ($rectangle.Width -le 0 -or $rectangle.Height -le 0) { continue }
+            $buttonName = [string]$button.Current.Name
+            $match = [regex]::Match($buttonName, '^Project:\s*(.+)$')
+            if ($match.Success) {
+                $projectNames += $match.Groups[1].Value.Trim()
+            }
+        }
+        $projectNames = @($projectNames | Sort-Object -Unique)
+        if ($projectNames.Count -ne 1) {
+            return [ordered]@{ resolved = $false; reason = if ($projectNames.Count -eq 0) { 'no_active_project' } else { 'ambiguous_active_project' } }
+        }
+        return [ordered]@{
+            resolved = $true
+            key = Get-StableChatProjectKey $projectNames[0]
+        }
+    } catch {
+        return [ordered]@{ resolved = $false; reason = 'project_accessibility_unavailable' }
+    }
+}
+
+function Read-ContextBindings {
+    if (-not (Test-Path -LiteralPath $bindingPath -PathType Leaf)) {
+        return [ordered]@{ schemaVersion = 1; bindings = @() }
+    }
+    try {
+        $registry = Get-Content -Raw -LiteralPath $bindingPath | ConvertFrom-Json
+        if (-not $registry.PSObject.Properties['bindings']) { throw 'missing bindings' }
+        return $registry
+    } catch {
+        return [ordered]@{ schemaVersion = 1; bindings = @() }
+    }
+}
+
+function Find-ContextBinding([string]$ProjectKey) {
+    if (-not $ProjectKey) { return $null }
+    $registry = Read-ContextBindings
+    @($registry.bindings | Where-Object {
+        $_.PSObject.Properties['projectKey'] -and [string]$_.projectKey -eq $ProjectKey -and
+        $_.PSObject.Properties['workspaceUrl'] -and $_.PSObject.Properties['contextKey']
+    } | Select-Object -First 1)
+}
+
+function Save-ContextBinding([string]$ProjectKey, [string]$ContextKey, [string]$WorkspaceUrl) {
+    if (-not $ProjectKey) { throw 'The active ChatGPT Project identity is unavailable.' }
+    $safeWorkspaceUrl = Confirm-CogentStackUrl $WorkspaceUrl
+    if ((Get-CogentStackContextFromUrl $safeWorkspaceUrl) -ne $ContextKey) {
+        throw 'The ChatGPT Project binding does not match the CogentStack context.'
+    }
+    $registry = Read-ContextBindings
+    $bindings = @($registry.bindings | Where-Object {
+        -not $_.PSObject.Properties['projectKey'] -or [string]$_.projectKey -ne $ProjectKey
+    })
+    $bindings += [ordered]@{
+        projectKey = $ProjectKey
+        contextKey = $ContextKey
+        workspaceUrl = $safeWorkspaceUrl
+        updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
+    }
+    New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+    [ordered]@{ schemaVersion = 1; bindings = $bindings } |
+        ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath $bindingPath -Encoding UTF8
+}
 
 function Get-WindowRectangle([Int64]$Handle) {
     $rectangle = New-Object CogentStackWorkspaceWindows+RECT
@@ -437,6 +538,25 @@ function Move-VisibleDesktopWindow($Window, [int]$X, [int]$Y, [int]$Width, [int]
         ($Y - [int]$insets.top) `
         ($Width + [int]$insets.left + [int]$insets.right) `
         ($Height + [int]$insets.top + [int]$insets.bottom)
+    # Electron can change its DWM frame after leaving maximized state. Correct
+    # against the post-move visible rectangle so the divider starts at the real
+    # ChatGPT edge instead of being covered by its newly sized frame.
+    for ($attempt = 0; $attempt -lt 2; $attempt++) {
+        $visible = Get-VisibleWindowRectangle $Window.Handle
+        if (-not $visible) { break }
+        $dx = $X - [int]$visible.x
+        $dy = $Y - [int]$visible.y
+        $dw = $Width - [int]$visible.width
+        $dh = $Height - [int]$visible.height
+        if ([Math]::Abs($dx) -le 1 -and [Math]::Abs($dy) -le 1 -and [Math]::Abs($dw) -le 1 -and [Math]::Abs($dh) -le 1) { break }
+        $raw = Get-WindowRectangle $Window.Handle
+        if (-not $raw) { break }
+        Move-DesktopWindow $Window `
+            ([int]$raw.x + $dx) `
+            ([int]$raw.y + $dy) `
+            ([int]$raw.width + $dw) `
+            ([int]$raw.height + $dh)
+    }
 }
 
 function Read-LayoutState {
@@ -613,6 +733,7 @@ function Confirm-BrowserTabCandidate($Candidate) {
 
 function Set-BrowserWorkspaceAddress($Window, [string]$TargetUrl) {
     try {
+        $targetContextKey = Get-CogentStackContextFromUrl (Confirm-CogentStackUrl $TargetUrl)
         $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.Handle)
         $addressCondition = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::NameProperty,
@@ -632,7 +753,12 @@ function Set-BrowserWorkspaceAddress($Window, [string]$TargetUrl) {
         [CogentStackWorkspaceWindows]::keybd_event(0x0D, 0, 2, [UIntPtr]::Zero)
         for ($attempt = 0; $attempt -lt 40; $attempt++) {
             Start-Sleep -Milliseconds 250
-            if ((Test-CogentStackWorkspaceAddress (Get-BrowserAddressValue $Window)) -and (Get-WebDocumentRectangle $Window)) {
+            $currentAddress = Get-BrowserAddressValue $Window
+            if (
+                (Test-CogentStackWorkspaceAddress $currentAddress) -and
+                (Get-CogentStackContextFromUrl $currentAddress) -eq $targetContextKey -and
+                (Get-WebDocumentRectangle $Window)
+            ) {
                 return $true
             }
         }
@@ -768,6 +894,8 @@ function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [In
 
     # Chrome can defer renderer resizing when a large background window changes style and size together.
     # First resize the still-framed window to the target half, then remove the frame after its document catches up.
+    [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Window.Handle, 9) | Out-Null
+    Start-Sleep -Milliseconds 150
     Move-VisibleDesktopWindow $Window $PanelX ([int]$Area.y) $PanelWidth ([int]$Area.height)
     [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$Window.Handle) | Out-Null
     [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$Window.Handle) | Out-Null
@@ -776,8 +904,8 @@ function Set-BrowserPageOnly($Window, $Area, [int]$PanelX, [int]$PanelWidth, [In
         [Math]::Abs([int]$rectangle.width - $PanelWidth) -le 64
     }
     $visibleBefore = Get-VisibleWindowRectangle $Window.Handle
-    if (-not $documentBefore -or -not $visibleBefore -or [Math]::Abs([int]$documentBefore.width - $PanelWidth) -gt 64) {
-        throw 'Chrome did not refresh the CogentStack document bounds before entering page-only mode.'
+    if (-not $documentBefore -or -not $visibleBefore) {
+        throw 'Windows could not remeasure the CogentStack document before entering page-only mode.'
     }
 
     $normalChromeHeight = [Math]::Max(0, [int]$documentBefore.y - [int]$visibleBefore.y)
@@ -1085,28 +1213,30 @@ function Get-WhiteDividerArea($Area, [int]$LeftWidth, [int]$Gutter) {
     }
 }
 
-function Set-WhiteDividerLayer($Divider, $PanelWindow) {
+function Set-WhiteDividerLayer($Divider, $ChatWindow, $PanelWindow) {
     if (-not $Divider -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$Divider.Handle)) {
         throw 'The white CogentStack divider is unavailable.'
     }
     [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$Divider.Handle, 5) | Out-Null
-    if (-not $PanelWindow -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$PanelWindow.Handle)) {
-        throw 'The CogentStack panel is unavailable for divider placement.'
+    if (-not $ChatWindow -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$ChatWindow.Handle) -or
+        -not $PanelWindow -or -not [CogentStackWorkspaceWindows]::IsWindow([IntPtr]$PanelWindow.Handle)) {
+        throw 'The companion panels are unavailable for divider placement.'
     }
-    # Anchor the passive divider immediately behind the CogentStack browser.
-    # It remains visible in the empty gutter, including while a capture tool
-    # has focus, while any window above the panel covers it naturally.
-    $anchored = [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle, 0, 0, 0, 0, 0x0013)
-    if (-not $anchored) {
-        throw 'Windows could not anchor the CogentStack divider behind the panel.'
+    # Make the passive divider an owned window of the CogentStack browser. An
+    # owned window stays above its owner and its DWM shadow, but is not globally
+    # topmost, so unrelated foreground windows still cover it normally.
+    $owned = [CogentStackWorkspaceWindows]::SetWindowOwner([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle)
+    $anchored = [CogentStackWorkspaceWindows]::SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0013)
+    if (-not $owned -or -not $anchored) {
+        throw 'Windows could not anchor the CogentStack divider between the companion panels.'
     }
 }
 
-function Start-WhiteDivider($Area, $PanelWindow) {
+function Start-WhiteDivider($Area, $ChatWindow, $PanelWindow) {
     $existing = @(Find-DividerWindow | Select-Object -First 1)
     if ($existing) {
         Move-DesktopWindow $existing ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
-        Set-WhiteDividerLayer $existing $PanelWindow
+        Set-WhiteDividerLayer $existing $ChatWindow $PanelWindow
         return $existing
     }
 
@@ -1177,7 +1307,7 @@ Add-Type -AssemblyName System.Drawing
     }
     if (-not $divider) { throw 'Windows could not create the white CogentStack divider.' }
     Move-DesktopWindow $divider ([int]$Area.x) ([int]$Area.y) ([int]$Area.width) ([int]$Area.height)
-    Set-WhiteDividerLayer $divider $PanelWindow
+    Set-WhiteDividerLayer $divider $ChatWindow $PanelWindow
     return $divider
 }
 
@@ -1212,6 +1342,7 @@ function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState
     $rememberedBackdrop = Find-RememberedWindow $State 'backdrop'
     $rememberedDivider = Find-RememberedWindow $State 'divider'
     if (-not $rememberedDivider) { $rememberedDivider = @(Find-DividerWindow | Select-Object -First 1) }
+    if (-not $rememberedBackdrop) { $rememberedBackdrop = @(Find-BackdropWindow | Select-Object -First 1) }
     if ($rememberedDivider) {
         if ($HideBackdrop) {
             [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$rememberedDivider.Handle, 0) | Out-Null
@@ -1254,6 +1385,35 @@ function Restore-CompanionLayout($State, [bool]$HideBackdrop, [bool]$RemoveState
     }
 }
 
+function Reset-OrphanedCompanionLayout($ChatWindow, $PanelWindow) {
+    $orphanBackdrop = @(Find-BackdropWindow | Select-Object -First 1)
+    $orphanDivider = @(Find-DividerWindow | Select-Object -First 1)
+    $panelRectangle = if ($PanelWindow) { Get-WindowRectangle $PanelWindow.Handle } else { $null }
+    $workingArea = if ($ChatWindow) { Get-MonitorWorkingArea $ChatWindow.Handle } else { $null }
+    $orphanPageOnly = [bool](
+        $panelRectangle -and $workingArea -and
+        [int]$panelRectangle.y -lt ([int]$workingArea.y - 64)
+    )
+    if (-not $orphanBackdrop -and -not $orphanDivider -and -not $orphanPageOnly) { return $false }
+    if ($orphanDivider) {
+        [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$orphanDivider.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    }
+    if ($orphanBackdrop) {
+        [CogentStackWorkspaceWindows]::PostMessage([IntPtr]$orphanBackdrop.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    }
+    if ($PanelWindow) {
+        Clear-WindowRegion $PanelWindow
+        [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$PanelWindow.Handle, 3) | Out-Null
+    }
+    if ($ChatWindow) {
+        [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$ChatWindow.Handle, 3) | Out-Null
+        [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$ChatWindow.Handle) | Out-Null
+        [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$ChatWindow.Handle) | Out-Null
+    }
+    Start-Sleep -Milliseconds 200
+    return $true
+}
+
 function Install-WorkModeShortcut {
     $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $powershellCommand) { return $null }
@@ -1272,7 +1432,7 @@ function Install-WorkModeShortcut {
     return $shortcutPath
 }
 
-function Suspend-CompanionLayout($State, [bool]$MaximizeBrowser = $true) {
+function Suspend-CompanionLayout($State, [bool]$MaximizeBrowser = $true, [string]$Reason = 'manual', [bool]$ActivateChat = $false) {
     if (-not $State) {
         return [ordered]@{ status = 'cold_start_required'; suspended = $false; fastResumeAvailable = $false }
     }
@@ -1285,8 +1445,13 @@ function Suspend-CompanionLayout($State, [bool]$MaximizeBrowser = $true) {
     $restore = Restore-CompanionLayout $State $true $false $MaximizeBrowser
     $State | Add-Member -MemberType NoteProperty -Name browserContentMode -Value 'normal-window' -Force
     $State | Add-Member -MemberType NoteProperty -Name browserContentClipped -Value $false -Force
+    $State | Add-Member -MemberType NoteProperty -Name suspendReason -Value $Reason -Force
     $State | Add-Member -MemberType NoteProperty -Name suspendedAt -Value ([DateTimeOffset]::UtcNow.ToString('O')) -Force
     Set-LayoutStateStatus $State 'suspended'
+    if ($ActivateChat -and $chatWindow) {
+        [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$chatWindow.Handle) | Out-Null
+        [CogentStackWorkspaceWindows]::SetForegroundWindow([IntPtr]$chatWindow.Handle) | Out-Null
+    }
     $watcher = Start-CompanionExitWatcher
     return [ordered]@{
         status = 'suspended'
@@ -1329,7 +1494,7 @@ function Resume-CompanionLayout($State) {
         $activeDivider = Find-RememberedWindow $State 'divider'
         $activePanelFrame = Get-WebDocumentRectangle $panelWindow
         $activeLayout = if ($activeDivider -and $activePanelFrame) {
-            Test-WorkspaceLayout $activeArea $chatWindow $activePanelFrame $activeGutter $activeDivider
+            Test-WorkspaceLayout $activeArea $chatWindow $activePanelFrame $activeGutter $activeDivider $panelWindow
         } else {
             $null
         }
@@ -1361,7 +1526,7 @@ function Resume-CompanionLayout($State) {
         [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$panelWindow.Handle) | Out-Null
         [CogentStackWorkspaceWindows]::BringWindowToTop([IntPtr]$chatWindow.Handle) | Out-Null
         $activeDividerArea = Get-WhiteDividerArea $activeArea $activeChatWidth $activeGutter
-        $activeDivider = Start-WhiteDivider $activeDividerArea $panelWindow
+        $activeDivider = Start-WhiteDivider $activeDividerArea $chatWindow $panelWindow
         $activeLayering = Test-WorkspacePanelsAboveBackdrop $activeBackdrop $chatWindow $panelWindow
         if (-not $activeLayering.verified) {
             $restore = Restore-CompanionLayout $State $false $true $true
@@ -1370,11 +1535,13 @@ function Resume-CompanionLayout($State) {
                 resumed = $false
                 fastResumeAvailable = $false
                 layoutVerified = $false
+                layoutDetails = $activeLayout
                 workspacePanelsAboveBackdrop = $false
+                layeringDetails = $activeLayering
                 browserWindowRestored = [bool]$restore.browserWindowRestored
             }
         }
-        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 11 -Force
+        $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 13 -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$activeDivider.Handle) -Force
         $State | Add-Member -MemberType NoteProperty -Name dividerProcessId -Value ([int]$activeDivider.ProcessId) -Force
         Save-LayoutState $State
@@ -1386,9 +1553,9 @@ function Resume-CompanionLayout($State) {
             whiteBackdrop = [bool]$activeBackdrop
             backdropLayer = if ($activeBackdrop) { 'above-desktop-behind-panels' } else { 'missing' }
             whiteDivider = [bool]$activeDivider
-            dividerEdgeVisible = [bool]$activeDivider
+            dividerEdgeVisible = [bool]($activeDivider -and $activeLayout.dividerLayered)
             dividerEdgeColor = '#CDCDCD'
-            dividerMasksShadows = [bool]$activeDivider
+            dividerMasksShadows = [bool]($activeDivider -and $activeLayout.dividerLayered)
             workspacePanelsAboveBackdrop = [bool]$activeLayering.verified
             headerVisible = [bool]$activeHeaderVisible
             browserTopCropRemoved = $activeTopCropRemoved
@@ -1429,7 +1596,7 @@ function Resume-CompanionLayout($State) {
     $divider = $null
     try {
         $dividerArea = Get-WhiteDividerArea $area $chatWidth $gutter
-        $divider = Start-WhiteDivider $dividerArea $panelWindow
+        $divider = Start-WhiteDivider $dividerArea $chatWindow $panelWindow
     } catch {
         Restore-BrowserWindow $panelWindow $State.panelOriginal ([Int64]$State.panelOriginalStyle)
         Restore-Window $chatWindow $State.chatDesktopOriginal
@@ -1439,11 +1606,11 @@ function Resume-CompanionLayout($State) {
         throw
     }
     Start-Sleep -Milliseconds 200
-    $layout = Test-WorkspaceLayout $area $chatWindow $pageOnly.contentFrame $gutter $divider
+    $layout = Test-WorkspaceLayout $area $chatWindow $pageOnly.contentFrame $gutter $divider $panelWindow
     $layering = Test-WorkspacePanelsAboveBackdrop $backdrop $chatWindow $panelWindow
     $headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
     $layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)
-    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 11 -Force
+    $State | Add-Member -MemberType NoteProperty -Name schemaVersion -Value 13 -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropHandle -Value ([Int64]$backdrop.Handle) -Force
     $State | Add-Member -MemberType NoteProperty -Name backdropProcessId -Value ([int]$backdrop.ProcessId) -Force
     $State | Add-Member -MemberType NoteProperty -Name dividerHandle -Value ([Int64]$divider.Handle) -Force
@@ -1459,7 +1626,9 @@ function Resume-CompanionLayout($State) {
             resumed = $false
             fastResumeAvailable = $false
             layoutVerified = $false
+            layoutDetails = $layout
             workspacePanelsAboveBackdrop = [bool]$layering.verified
+            layeringDetails = $layering
             headerVisible = [bool]$headerVisible
             browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
             browserWindowRestored = [bool]$restore.browserWindowRestored
@@ -1479,10 +1648,11 @@ function Resume-CompanionLayout($State) {
         whiteBackdrop = $true
         backdropLayer = 'above-desktop-behind-panels'
         whiteDivider = [bool]$divider
-        dividerEdgeVisible = [bool]$divider
+        dividerEdgeVisible = [bool]($divider -and $layout.dividerLayered)
         dividerEdgeColor = '#CDCDCD'
-        dividerMasksShadows = [bool]$layout.dividerAligned
+        dividerMasksShadows = [bool]($layout.dividerAligned -and $layout.dividerLayered)
         workspacePanelsAboveBackdrop = [bool]$layering.verified
+        layeringDetails = $layering
         companionExitWatcherStarted = [bool]$watcher
         shortcut = Install-WorkModeShortcut
     }
@@ -1538,7 +1708,7 @@ function Invoke-ApprovedProjectDeletion([string]$ContextKey = 'default') {
     }
 }
 
-function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter, $DividerWindow) {
+function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter, $DividerWindow, $PanelWindow) {
     $chat = Get-VisibleWindowRectangle $ChatWindow.Handle
     $panel = $PanelFrame
     $divider = if ($DividerWindow) { Get-WindowRectangle $DividerWindow.Handle } else { $null }
@@ -1557,6 +1727,11 @@ function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter, $Di
         [Math]::Abs([int]$divider.width - $Gutter) -le $tolerance -and
         [Math]::Abs([int]$divider.height - [int]$Area.height) -le $tolerance
     )
+    $dividerLayered = [bool](
+        $dividerAligned -and $PanelWindow -and
+        [CogentStackWorkspaceWindows]::GetWindow([IntPtr]$DividerWindow.Handle, 4) -eq [IntPtr]$PanelWindow.Handle -and
+        [CogentStackWorkspaceWindows]::IsWindowAbove([IntPtr]$DividerWindow.Handle, [IntPtr]$PanelWindow.Handle)
+    )
     [ordered]@{
         verified = (
             [Math]::Abs([int]$chat.x - [int]$Area.x) -le $tolerance -and
@@ -1567,13 +1742,14 @@ function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter, $Di
             [Math]::Abs($panelRight - $areaRight) -le $tolerance -and
             [Math]::Abs($chatBottom - $areaBottom) -le $tolerance -and
             [Math]::Abs($panelBottom - $areaBottom) -le $tolerance -and
-            $dividerAligned
+            $dividerLayered
         )
         joined = $Gutter -eq 0 -and $gapAligned
         separated = $Gutter -gt 0 -and $gapAligned
         equalWidth = [Math]::Abs([int]$chat.width - [int]$panel.width) -le $tolerance
         topAligned = [Math]::Abs([int]$chat.y - [int]$panel.y) -le $tolerance
         dividerAligned = $dividerAligned
+        dividerLayered = $dividerLayered
         chat = $chat
         panel = $panel
         divider = $divider
@@ -1583,6 +1759,7 @@ function Test-WorkspaceLayout($Area, $ChatWindow, $PanelFrame, [int]$Gutter, $Di
 $state = Read-LayoutState
 $browsers = @(Get-CompanionBrowsers)
 $chatDesktopWindow = @(Get-ChatDesktopWindow | Select-Object -First 1)
+$activeChatProject = Get-ActiveChatProject $chatDesktopWindow
 
 if ($Mode -eq 'InstallToggle') {
     $shortcut = Install-WorkModeShortcut
@@ -1612,6 +1789,8 @@ if ($Mode -eq 'Toggle') {
 if ($Mode -eq 'WatchExit') {
     $watcherMutex = New-Object System.Threading.Mutex($false, 'Local\CogentStackCompanionExitWatcher')
     $ownsMutex = $false
+    $pendingProjectKey = $null
+    $pendingProjectCount = 0
     try {
         $ownsMutex = $watcherMutex.WaitOne(0)
         if (-not $ownsMutex) { exit 0 }
@@ -1620,6 +1799,71 @@ if ($Mode -eq 'WatchExit') {
             if (-not $watchState) { break }
             $watchPanel = Find-RememberedWindow $watchState 'panel'
             if (-not $watchPanel) { break }
+            $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
+            $watchChat = Find-RememberedWindow $watchState 'chatDesktop'
+            $activeProject = Get-ActiveChatProject $watchChat
+            $rememberedProjectKey = if ($watchState.PSObject.Properties['chatProjectKey']) { [string]$watchState.chatProjectKey } else { '' }
+            $observedProjectKey = if ($activeProject.resolved) { [string]$activeProject.key } else { 'unresolved' }
+            if ($observedProjectKey -ne $rememberedProjectKey) {
+                if ($pendingProjectKey -eq $observedProjectKey) { $pendingProjectCount++ } else {
+                    $pendingProjectKey = $observedProjectKey
+                    $pendingProjectCount = 1
+                }
+                if ($pendingProjectCount -lt 4) {
+                    Start-Sleep -Milliseconds 250
+                    continue
+                }
+                $binding = if ($activeProject.resolved) { Find-ContextBinding ([string]$activeProject.key) } else { $null }
+                if (-not $binding) {
+                    if ($layoutStatus -eq 'active') {
+                        Suspend-CompanionLayout $watchState $false 'inactive-project' $true | Out-Null
+                    }
+                    Start-Sleep -Milliseconds 250
+                    continue
+                }
+                try {
+                    $boundUrl = Confirm-CogentStackUrl ([string]$binding.workspaceUrl)
+                    $boundContextKey = Get-CogentStackContextFromUrl $boundUrl
+                    if ($boundContextKey -ne [string]$binding.contextKey) { throw 'binding mismatch' }
+                } catch {
+                    if ($layoutStatus -eq 'active') {
+                        Suspend-CompanionLayout $watchState $false 'inactive-project' $true | Out-Null
+                    }
+                    Start-Sleep -Milliseconds 250
+                    continue
+                }
+                if ($layoutStatus -eq 'active') {
+                    Suspend-CompanionLayout $watchState $false 'context-switch' $true | Out-Null
+                }
+                $watchState | Add-Member -MemberType NoteProperty -Name chatProjectKey -Value ([string]$activeProject.key) -Force
+                $watchState | Add-Member -MemberType NoteProperty -Name contextKey -Value $boundContextKey -Force
+                $watchState | Add-Member -MemberType NoteProperty -Name workspaceUrl -Value $boundUrl -Force
+                $watchState | Add-Member -MemberType NoteProperty -Name suspendReason -Value 'context-switch' -Force
+                Save-LayoutState $watchState
+                $watchAddress = Get-BrowserAddressValue $watchPanel
+                $addressMatchesBinding = $false
+                try {
+                    $addressMatchesBinding = (Test-CogentStackWorkspaceAddress $watchAddress) -and
+                        (Get-CogentStackContextFromUrl $watchAddress) -eq $boundContextKey
+                } catch { $addressMatchesBinding = $false }
+                if (-not $addressMatchesBinding -and -not (Set-BrowserWorkspaceAddress $watchPanel $boundUrl)) {
+                    Start-Sleep -Milliseconds 250
+                    continue
+                }
+                Resume-CompanionLayout $watchState | Out-Null
+                $pendingProjectKey = $null
+                $pendingProjectCount = 0
+                Start-Sleep -Milliseconds 250
+                continue
+            }
+            $pendingProjectKey = $null
+            $pendingProjectCount = 0
+            $suspendReason = if ($watchState.PSObject.Properties['suspendReason']) { [string]$watchState.suspendReason } else { 'manual' }
+            if ($layoutStatus -eq 'suspended' -and $suspendReason -eq 'inactive-project') {
+                Resume-CompanionLayout $watchState | Out-Null
+                Start-Sleep -Milliseconds 250
+                continue
+            }
             $watchAddress = Get-BrowserAddressValue $watchPanel
             if (Test-CompanionProjectDeletionAddress $watchAddress) {
                 $watchContextKey = if ($watchState.PSObject.Properties['contextKey']) { [string]$watchState.contextKey } else { 'default' }
@@ -1632,8 +1876,6 @@ if ($Mode -eq 'WatchExit') {
                 Start-Sleep -Milliseconds 500
                 continue
             }
-            $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
-            $watchChat = Find-RememberedWindow $watchState 'chatDesktop'
             $watchDivider = Find-RememberedWindow $watchState 'divider'
             $watchBackdrop = Find-RememberedWindow $watchState 'backdrop'
             if ($watchDivider) {
@@ -1645,7 +1887,7 @@ if ($Mode -eq 'WatchExit') {
                     $watchGutter = if ($watchState.PSObject.Properties['gutter']) { [int]$watchState.gutter } else { 12 }
                     $watchPanelFrame = Get-WebDocumentRectangle $watchPanel
                     if ($watchPanelFrame) {
-                        $watchLayout = Test-WorkspaceLayout $watchArea $watchChat $watchPanelFrame $watchGutter $watchDivider
+                        $watchLayout = Test-WorkspaceLayout $watchArea $watchChat $watchPanelFrame $watchGutter $watchDivider $watchPanel
                         $watchLayoutVerified = [bool]$watchLayout.verified
                         $watchHeaderVisible = Test-CogentStackHeaderVisible $watchPanel $watchArea
                     }
@@ -1656,7 +1898,7 @@ if ($Mode -eq 'WatchExit') {
                         Restore-CompanionLayout $watchState $false $true $true | Out-Null
                         break
                     }
-                    try { Set-WhiteDividerLayer $watchDivider $watchPanel } catch { }
+                    try { Set-WhiteDividerLayer $watchDivider $watchChat $watchPanel } catch { }
                 } elseif ($layoutStatus -eq 'active' -and $watchLayoutVerified -and (-not $watchHeaderVisible -or -not $watchTopCropRemoved)) {
                     try { Resume-CompanionLayout $watchState | Out-Null } catch { }
                     Start-Sleep -Milliseconds 250
@@ -1697,10 +1939,19 @@ if ($Mode -eq 'WatchExit') {
 
 if ($Mode -eq 'Inspect') {
     $existingPanel = @(Find-ExistingCogentStackWindow $browsers | Select-Object -First 1)
+    $inspectDivider = @(Find-DividerWindow | Select-Object -First 1)
+    $inspectPanelWindow = if ($state) { Find-RememberedWindow $state 'panel' } elseif ($existingPanel) { $existingPanel.Window } else { $null }
+    $inspectDividerLayered = [bool](
+        $inspectDivider -and $chatDesktopWindow -and $inspectPanelWindow -and
+        [CogentStackWorkspaceWindows]::GetWindow([IntPtr]$inspectDivider.Handle, 4) -eq [IntPtr]$inspectPanelWindow.Handle -and
+        [CogentStackWorkspaceWindows]::IsWindowAbove([IntPtr]$inspectDivider.Handle, [IntPtr]$inspectPanelWindow.Handle)
+    )
     Write-CompactJson ([ordered]@{
         status = 'inspected'
         platform = 'windows'
         chatDesktopWindowFound = [bool]$chatDesktopWindow
+        chatProjectResolved = [bool]$activeChatProject.resolved
+        chatProjectBound = [bool]($activeChatProject.resolved -and (Find-ContextBinding ([string]$activeChatProject.key)))
         existingCogentStackWindowFound = [bool]$existingPanel
         browserAvailable = $browsers.Count -gt 0
         browser = if ($existingPanel) { [string]$existingPanel.Browser.Name } elseif ($browsers.Count -gt 0) { [string]$browsers[0].Name } else { $null }
@@ -1712,10 +1963,10 @@ if ($Mode -eq 'Inspect') {
         fastResumeAvailable = [bool]($state -and $state.PSObject.Properties['layoutStatus'] -and [string]$state.layoutStatus -eq 'suspended')
         gutter = if ($state -and $state.PSObject.Properties['gutter']) { [int]$state.gutter } else { 0 }
         whiteBackdrop = [bool](Find-BackdropWindow)
-        whiteDivider = [bool](Find-DividerWindow)
-        dividerEdgeVisible = [bool](Find-DividerWindow)
+        whiteDivider = [bool]$inspectDivider
+        dividerEdgeVisible = $inspectDividerLayered
         dividerEdgeColor = '#CDCDCD'
-        dividerMasksShadows = [bool](Find-DividerWindow)
+        dividerMasksShadows = $inspectDividerLayered
     })
     exit 0
 }
@@ -1753,6 +2004,15 @@ if ($Mode -eq 'Close') {
 
 $safeUrl = Confirm-CogentStackUrl $Url
 $requestedContextKey = Get-CogentStackContextFromUrl $safeUrl
+if (-not $activeChatProject.resolved) {
+    Write-CompactJson ([ordered]@{
+        status = 'chatgpt_project_unresolved'
+        message = 'CogentStack was not opened because one active ChatGPT Project could not be identified safely.'
+        reason = [string]$activeChatProject.reason
+        openedNewTab = $false
+    })
+    exit 2
+}
 if ($browsers.Count -eq 0) {
     Write-CompactJson ([ordered]@{
         status = 'browser_unavailable'
@@ -1767,7 +2027,8 @@ try {
     # browser-wide discovery and does not touch other browser tabs.
     if ($state) {
         $rememberedContextKey = if ($state.PSObject.Properties['contextKey']) { [string]$state.contextKey } else { 'default' }
-        if ($rememberedContextKey -ne $requestedContextKey) {
+        $rememberedProjectKey = if ($state.PSObject.Properties['chatProjectKey']) { [string]$state.chatProjectKey } else { '' }
+        if ($rememberedContextKey -ne $requestedContextKey -or $rememberedProjectKey -ne [string]$activeChatProject.key) {
             Restore-CompanionLayout $state $false $true $false | Out-Null
             $state = $null
         }
@@ -1889,6 +2150,9 @@ if (-not $chatDesktopWindow) {
     })
     exit 0
 }
+if (-not $state) {
+    Reset-OrphanedCompanionLayout $chatDesktopWindow $panelWindow | Out-Null
+}
 
 $oldRememberedPanel = Find-RememberedWindow $state 'panel'
 if ($state -and $state.PSObject.Properties['schemaVersion'] -and [int]$state.schemaVersion -lt 2 -and $oldRememberedPanel -and [Int64]$oldRememberedPanel.Handle -ne [Int64]$panelWindow.Handle) {
@@ -1948,7 +2212,7 @@ try {
 $divider = $null
 try {
     $dividerArea = Get-WhiteDividerArea $area $chatDesktopWidth $gutter
-    $divider = Start-WhiteDivider $dividerArea $panelWindow
+    $divider = Start-WhiteDivider $dividerArea $chatDesktopWindow $panelWindow
 } catch {
     Restore-BrowserWindow $panelWindow $panelOriginal $panelOriginalStyle
     Restore-Window $chatDesktopWindow $chatOriginal
@@ -1959,13 +2223,13 @@ try {
 }
 Start-Sleep -Milliseconds 200
 
-$layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame $gutter $divider
+$layout = Test-WorkspaceLayout $area $chatDesktopWindow $pageOnly.contentFrame $gutter $divider $panelWindow
 $layering = Test-WorkspacePanelsAboveBackdrop $backdrop $chatDesktopWindow $panelWindow
 $headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
 $layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
-$layoutState = [ordered]@{
-    schemaVersion = 12
+$layoutState = [pscustomobject][ordered]@{
+    schemaVersion = 13
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
@@ -1992,6 +2256,8 @@ $layoutState = [ordered]@{
     accountState = [string]$panelSelection.AccountState
     workspaceUrl = $safeUrl
     contextKey = $requestedContextKey
+    chatProjectKey = [string]$activeChatProject.key
+    suspendReason = 'none'
     layoutStatus = 'active'
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
 }
@@ -2000,6 +2266,7 @@ if (-not $layoutAccepted) {
     Write-CompactJson ([ordered]@{
         status = 'layout_rejected'
         layoutVerified = $false
+        layoutDetails = $layout
         workspacePanelsAboveBackdrop = [bool]$layering.verified
         headerVisible = [bool]$headerVisible
         browserTopCropRemoved = [bool]$pageOnly.topCropRemoved
@@ -2010,6 +2277,7 @@ if (-not $layoutAccepted) {
     exit 0
 }
 Save-LayoutState $layoutState
+Save-ContextBinding ([string]$activeChatProject.key) $requestedContextKey $safeUrl
 
 $exitWatcher = Start-CompanionExitWatcher
 $workModeShortcut = Install-WorkModeShortcut
@@ -2029,9 +2297,9 @@ Write-CompactJson ([ordered]@{
     whiteBackdrop = $true
     backdropLayer = 'above-desktop-behind-panels'
     whiteDivider = [bool]$divider
-    dividerEdgeVisible = [bool]$divider
+    dividerEdgeVisible = [bool]($divider -and $layout.dividerLayered)
     dividerEdgeColor = '#CDCDCD'
-    dividerMasksShadows = [bool]$layout.dividerAligned
+    dividerMasksShadows = [bool]($layout.dividerAligned -and $layout.dividerLayered)
     workspacePanelsAboveBackdrop = [bool]$layering.verified
     browserContentMode = 'page-only'
     browserChromeHidden = $true
@@ -2051,6 +2319,7 @@ Write-CompactJson ([ordered]@{
     candidateTabsActivated = $candidateTabsActivated
     accountState = [string]$panelSelection.AccountState
     contextKey = $requestedContextKey
+    chatProjectBound = $true
     chatFrame = $layout.chat
     panelFrame = $layout.panel
     browserWindowFrame = $pageOnly.windowFrame

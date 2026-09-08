@@ -265,22 +265,31 @@ for (const marker of [
   "$layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)",
   "status = 'resume_rejected'",
   "status = 'layout_rejected'",
-  "SetWindowPos([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle",
+  "SetWindowOwner([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle)",
+  "GetWindow([IntPtr]$DividerWindow.Handle, 4)",
+  "dividerLayered = $dividerLayered",
   "$activeLayout.verified",
   "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
   "$parsed = ConvertTo-CogentStackUri $Address",
-  "schemaVersion = 12",
+  "schemaVersion = 13",
+  "function Get-ActiveChatProject",
+  "chatgpt_project_unresolved",
+  "chatgpt-companion-contexts.json",
+  "Find-ContextBinding",
+  "Suspend-CompanionLayout $watchState $false 'inactive-project' $true",
+  "Save-ContextBinding ([string]$activeChatProject.key) $requestedContextKey $safeUrl",
+  "$targetContextKey = Get-CogentStackContextFromUrl (Confirm-CogentStackUrl $TargetUrl)",
   "$watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress)",
   "($Mode -eq 'Close')",
 ]) {
   if (!codexCompanionSource.includes(marker)) fail(`Codex companion helper is missing navigation recovery marker: ${marker}`);
 }
 if (codexCompanionSource.includes("TopMost = `$true")) fail("Codex divider must not be globally topmost");
-const codexWatchAddressIndex = codexCompanionSource.indexOf("$watchAddress = Get-BrowserAddressValue $watchPanel");
-const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexWatchAddressIndex);
-const codexLayoutIndex = codexCompanionSource.indexOf("$layoutStatus =", codexWatchAddressIndex);
-if (codexWatchAddressIndex < 0 || codexDeletionIndex <= codexWatchAddressIndex || codexDeletionIndex >= codexLayoutIndex) {
-  fail("Codex companion must process approved deletion immediately after reading the normalized browser address");
+const codexProjectIndex = codexCompanionSource.indexOf("$activeProject = Get-ActiveChatProject $watchChat");
+const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexProjectIndex);
+const codexWatchAddressIndex = codexCompanionSource.lastIndexOf("$watchAddress = Get-BrowserAddressValue $watchPanel", codexDeletionIndex);
+if (codexProjectIndex < 0 || codexWatchAddressIndex <= codexProjectIndex || codexDeletionIndex <= codexWatchAddressIndex) {
+  fail("Codex companion must confirm the active ChatGPT Project before processing its normalized browser address");
 }
 
 const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
