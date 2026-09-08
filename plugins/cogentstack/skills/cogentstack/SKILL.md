@@ -87,9 +87,13 @@ When a user loads or edits an existing project from a different ChatGPT Project:
 
 ## Generate or restart the active project preview
 
-The hosted **Edit project** page remembers the last verified local preview address and presents its own **View project** button while that exact preview remains live. Routine viewing must use that button; it must not invoke Codex, rerun readiness, relaunch the companion, or start another preview process.
+The hosted **Edit project** page remembers the last verified local preview address and port. While the exact project-owned preview is live, it presents **View project**. When it is stopped, the compact project card presents **Open saved preview** or **Start project preview**. Pressing that hosted control is the user's explicit preview-launch request: it signals the bound local companion watcher, which starts one independent worker for the exact active project and context, runs `scripts/generate-project-preview.ps1 -Mode generate`, prefers the verified saved port, re-verifies listener ownership and health, and opens the resulting loopback view in the user's normal browser. It must not require a Codex command, another confirmation, a manually entered port, or a companion relaunch. The reserved CogentStack workspace tab remains intact; the separately opened project view may cause the companion to suspend and restore the ordinary browser layout.
 
-When the user explicitly says `@cogentstack view active project`, treat the command as preview generation or recovery only:
+The watcher must accept only a UUID-scoped `desktop_action=preview_project` signal whose URL context matches its bound logical context. It handles that signal before transient visible-Project checks can discard it, suppresses duplicate request IDs, and reports a compact failure state back to the same workspace if the worker cannot start or the verified preview cannot be produced. A remembered port is a preferred restart target, never proof that a process is live. The worker must still confirm the exact active target path, project-owned listener process tree, loopback HTTP address, explicit port, and healthy response before opening anything.
+
+Routine viewing of an already-running preview must use the hosted **View project** button; it must not invoke Codex, rerun readiness, relaunch the companion, or start another preview process.
+
+When the user explicitly says `@cogentstack view active project`, treat the command as a manual recovery path only when the hosted preview button or automatic Desktop handoff was unavailable:
 
 1. Run `scripts/generate-project-preview.ps1 -Mode generate` exactly once. Do not open a browser tab or navigate the reserved CogentStack companion tab to localhost.
 2. The helper obtains the sole active project through the protected service, accepts only its exact absolute target path, and first looks for an already-running preview that is both healthy and owned by a process tree containing that exact project path. It must never trust a stale port, arbitrary localhost service, conversation-supplied path, or process ID.

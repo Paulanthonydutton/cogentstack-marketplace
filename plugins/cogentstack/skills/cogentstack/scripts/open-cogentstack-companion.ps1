@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'Suspend', 'Resume', 'Toggle', 'InstallToggle', 'WatchExit', 'CreateProjectWorker')]
+    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'Suspend', 'Resume', 'Toggle', 'InstallToggle', 'WatchExit', 'CreateProjectWorker', 'PreviewProjectWorker')]
     [string]$Mode = 'Open',
     [string]$Url = 'https://cogentstack.app/stack?surface=chatgpt',
     [string]$RequestId = '',
@@ -903,6 +903,17 @@ function Get-CompanionProjectCreationRequestId([string]$Address) {
     $parsed = ConvertTo-CogentStackUri $Address
     if ($null -eq $parsed -or $parsed.AbsolutePath.TrimEnd('/') -ne '/stack' -or
         $parsed.Query -notmatch '(?i)(?:^|[?&])desktop_action=create_project(?:&|$)') {
+        return ''
+    }
+    $requestMatch = [regex]::Match($parsed.Query, '(?i)(?:^|[?&])desktop_request=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:&|$)')
+    if (-not $requestMatch.Success) { return '' }
+    return $requestMatch.Groups[1].Value.ToLowerInvariant()
+}
+
+function Get-CompanionProjectPreviewRequestId([string]$Address) {
+    $parsed = ConvertTo-CogentStackUri $Address
+    if ($null -eq $parsed -or $parsed.AbsolutePath.TrimEnd('/') -ne '/stack' -or
+        $parsed.Query -notmatch '(?i)(?:^|[?&])desktop_action=preview_project(?:&|$)') {
         return ''
     }
     $requestMatch = [regex]::Match($parsed.Query, '(?i)(?:^|[?&])desktop_request=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:&|$)')
@@ -1830,6 +1841,32 @@ function Start-ApprovedProjectCreationWorker([string]$ApprovedRequestId, [string
     }
 }
 
+function Start-ActiveProjectPreviewWorker([string]$PreviewRequestId, [string]$PreviewContextKey) {
+    if ($PreviewRequestId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { return $false }
+    if ($PreviewContextKey -ne 'default' -and $PreviewContextKey -notmatch '^ctx-[0-9a-f]{64}$') { return $false }
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $powershellCommand) { return $false }
+    try {
+        $worker = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $PSCommandPath,
+            '-Mode',
+            'PreviewProjectWorker',
+            '-RequestId',
+            $PreviewRequestId,
+            '-ContextKey',
+            $PreviewContextKey
+        ) -WindowStyle Hidden -PassThru
+        return $null -ne $worker
+    } catch {
+        return $false
+    }
+}
+
 function Invoke-ApprovedProjectDeletion([string]$ContextKey = 'default') {
     $deleteScript = Join-Path $PSScriptRoot 'delete-project.ps1'
     if (-not (Test-Path -LiteralPath $deleteScript -PathType Leaf)) { return $false }
@@ -1878,6 +1915,47 @@ function Invoke-ApprovedProjectCreation([string]$RequestId, [string]$ContextKey 
         return $process.ExitCode -eq 0
     } catch {
         return $false
+    }
+}
+
+function Invoke-ActiveProjectPreview([string]$ContextKey = 'default') {
+    $previewScript = Join-Path $PSScriptRoot 'generate-project-preview.ps1'
+    if (-not (Test-Path -LiteralPath $previewScript -PathType Leaf)) {
+        return [pscustomobject]@{ success = $false; localUrl = '' }
+    }
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $powershellCommand) {
+        return [pscustomobject]@{ success = $false; localUrl = '' }
+    }
+    try {
+        # Run the generator in a child host because its terminal branches use `exit`.
+        # An in-process invocation would terminate this worker before it could report
+        # failure or open the verified preview.
+        $output = @(& ([string]$powershellCommand.Source) -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $previewScript -Mode generate -ContextKey $ContextKey 2>&1 | ForEach-Object { [string]$_ })
+        $exitCode = $LASTEXITCODE
+        $jsonLine = @($output | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        if ($exitCode -ne 0 -or -not $jsonLine) {
+            return [pscustomobject]@{ success = $false; localUrl = '' }
+        }
+        $result = $jsonLine | ConvertFrom-Json
+        if ([string]$result.status -notin @('generated', 'already_running') -or -not [bool]$result.remembered) {
+            return [pscustomobject]@{ success = $false; localUrl = '' }
+        }
+        $previewUri = $null
+        if (-not [Uri]::TryCreate([string]$result.localUrl, [UriKind]::Absolute, [ref]$previewUri)) {
+            return [pscustomobject]@{ success = $false; localUrl = '' }
+        }
+        if (
+            $previewUri.Scheme -ne 'http' -or
+            $previewUri.Host -notin @('localhost', '127.0.0.1', '::1', '[::1]') -or
+            $previewUri.IsDefaultPort -or
+            -not [string]::IsNullOrWhiteSpace($previewUri.UserInfo)
+        ) {
+            return [pscustomobject]@{ success = $false; localUrl = '' }
+        }
+        return [pscustomobject]@{ success = $true; localUrl = $previewUri.AbsoluteUri }
+    } catch {
+        return [pscustomobject]@{ success = $false; localUrl = '' }
     }
 }
 
@@ -1987,12 +2065,44 @@ if ($Mode -eq 'CreateProjectWorker') {
     }
 }
 
+if ($Mode -eq 'PreviewProjectWorker') {
+    if ($RequestId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { exit 1 }
+    if ($ContextKey -ne 'default' -and $ContextKey -notmatch '^ctx-[0-9a-f]{64}$') { exit 1 }
+    $previewMutex = New-Object System.Threading.Mutex($false, "Local\CogentStackCompanionProjectPreview-$($RequestId.ToLowerInvariant())")
+    $ownsPreviewMutex = $false
+    try {
+        $ownsPreviewMutex = $previewMutex.WaitOne(0)
+        if (-not $ownsPreviewMutex) { exit 0 }
+        $preview = Invoke-ActiveProjectPreview $ContextKey
+        $workerState = Read-LayoutState
+        $workerPanel = if (
+            $workerState -and
+            [string]$workerState.contextKey -eq $ContextKey
+        ) { Find-RememberedWindow $workerState 'panel' } else { $null }
+        if ($workerState -and $workerPanel) {
+            $previewResult = if ($preview.success) { 'ready' } else { 'failed' }
+            $returnUrl = [string]$workerState.workspaceUrl
+            $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_preview=$previewResult&desktop_request=$RequestId"
+            Set-BrowserWorkspaceAddress $workerPanel $returnUrl | Out-Null
+        }
+        if ($preview.success) {
+            Start-Sleep -Milliseconds 350
+            Start-Process -FilePath ([string]$preview.localUrl) | Out-Null
+        }
+        exit $(if ($preview.success) { 0 } else { 1 })
+    } finally {
+        if ($ownsPreviewMutex) { $previewMutex.ReleaseMutex() }
+        $previewMutex.Dispose()
+    }
+}
+
 if ($Mode -eq 'WatchExit') {
     $watcherMutex = New-Object System.Threading.Mutex($false, 'Local\CogentStackCompanionExitWatcher')
     $ownsMutex = $false
     $pendingProjectKey = $null
     $pendingProjectCount = 0
     $handledCreationRequests = New-Object 'System.Collections.Generic.HashSet[string]'
+    $handledPreviewRequests = New-Object 'System.Collections.Generic.HashSet[string]'
     try {
         $ownsMutex = $watcherMutex.WaitOne(0)
         if (-not $ownsMutex) { exit 0 }
@@ -2023,6 +2133,27 @@ if ($Mode -eq 'WatchExit') {
                 if (-not $creationStarted) {
                     $returnUrl = [string]$watchState.workspaceUrl
                     $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_creation=failed&desktop_request=$creationRequestId"
+                    Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
+                }
+                Start-Sleep -Milliseconds 500
+                continue
+            }
+            $previewRequestId = Get-CompanionProjectPreviewRequestId $watchAddress
+            $previewAddressContextKey = if ($previewRequestId) {
+                try { Get-CogentStackContextFromUrl $watchAddress } catch { '' }
+            } else { '' }
+            if (
+                $previewRequestId -and
+                $previewAddressContextKey -eq $watchContextKey -and
+                $handledPreviewRequests.Add($previewRequestId)
+            ) {
+                # The user explicitly pressed the hosted preview control. Start the exact
+                # active project's verified preview before any transient Project visibility
+                # change can suspend the companion and lose the one-click request.
+                $previewStarted = Start-ActiveProjectPreviewWorker $previewRequestId $watchContextKey
+                if (-not $previewStarted) {
+                    $returnUrl = [string]$watchState.workspaceUrl
+                    $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_preview=failed&desktop_request=$previewRequestId"
                     Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
                 }
                 Start-Sleep -Milliseconds 500
