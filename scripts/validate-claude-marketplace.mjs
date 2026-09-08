@@ -227,101 +227,24 @@ const validateExistingTabReuse = (source, label) => {
 
 validateExistingTabReuse(panelSource, "Claude");
 const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "scripts");
-const codexCompanionSource = await readFile(join(codexScriptsRoot, "open-cogentstack-companion.ps1"), "utf8");
-validateExistingTabReuse(codexCompanionSource, "Codex");
-for (const marker of [
-  "Test-CompanionOwnedAddress",
-  "Test-CompanionSuspendAddress",
-  "Test-CompanionResumeAddress",
-  "if (Test-CompanionResumeAddress $watchAddress)",
-  "if ($layoutStatus -eq 'suspended')",
-  "status = 'already_active'",
-  "Suspend-CompanionLayout",
-  "Resume-CompanionLayout",
-  "CogentStack Work Mode (Codex).lnk",
-  "Start-WhiteDivider",
-  "CogentStack Workspace Divider",
-  "WS_EX_TRANSPARENT",
-  "WS_EX_NOACTIVATE",
-  "dividerMasksShadows",
-  "dividerEdgeVisible",
-  "CogentStackPanelEdge",
-  "FromArgb(205, 205, 205)",
-  "dividerEdgeColor = '#CDCDCD'",
-  "GetWindow(IntPtr hWnd, uint command)",
-  "IsWindowAbove(IntPtr upper, IntPtr lower)",
-  "Test-WorkspacePanelsAboveBackdrop",
-  "workspacePanelsAboveBackdrop",
-  "$watchLayoutVerified",
-  "$watchHeaderVisible",
-  "function Test-CogentStackHeaderVisible",
-  "function Wait-CogentStackHeaderVisible",
-  "$topInset = if ($normalChromeHeight -gt 0)",
-  "$top = if ($PreserveOffscreenTop) { 0 } else { $documentTop }",
-  "Set-WindowContentRegion $Window $documentFinal $true",
-  "$documentTop -lt 0",
-  "topCropRemoved = [bool]($clipInsets.top -eq 0)",
-  "browserTopCropRemoved = [bool]$pageOnly.topCropRemoved",
-  "$layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)",
-  "status = 'resume_rejected'",
-  "status = 'layout_rejected'",
-  "SetWindowOwner([IntPtr]$Divider.Handle, [IntPtr]$PanelWindow.Handle)",
-  "GetWindow([IntPtr]$DividerWindow.Handle, 4)",
-  "dividerLayered = $dividerLayered",
-  "$activeLayout.verified",
-  "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
-  "$parsed = ConvertTo-CogentStackUri $Address",
-  "schemaVersion = 15",
-  "function Get-ActiveChatProject",
-  "function Wait-ActiveChatProject",
-  "Get-CogentStackProjectContext",
-  "Find-ContextBindingByContext",
-  "function Resolve-ChatProjectForOpen",
-  "stable-project-context",
-  "project_context_conflict",
-  "remembered-context-binding",
-  "projectDetectionAttempts",
-  "chatgpt_project_unresolved",
-  "chatgpt-companion-contexts.json",
-  "Find-ContextBinding",
-  "Suspend-CompanionLayout $watchState $true 'inactive-project' $true",
-  "$pendingProjectCount -lt 4",
-  "chatProjectVisualBindingPending",
-  "accessibility-late-binding",
-  "Save-ContextBinding ([string]$activeChatProject.key) $requestedContextKey $safeUrl",
-  "$targetContextKey = Get-CogentStackContextFromUrl (Confirm-CogentStackUrl $TargetUrl)",
-  "$watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress)",
-  "($Mode -eq 'Close')",
-]) {
-  if (!codexCompanionSource.includes(marker)) fail(`Codex companion helper is missing navigation recovery marker: ${marker}`);
+const codexSkillSource = await readFile(join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "SKILL.md"), "utf8");
+const codexBridgeSource = await readFile(join(codexScriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
+const codexWatcherSource = await readFile(join(codexScriptsRoot, "watch-cogentstack-bridge.ps1"), "utf8");
+for (const marker of ["CogentStack is a normal web application", "browserOpened: false", "Do not open it, call a browser-control tool"] ) {
+  if (!codexSkillSource.includes(marker)) fail(`Codex web-first skill is missing required marker: ${marker}`);
 }
-if (codexCompanionSource.includes("TopMost = `$true")) fail("Codex divider must not be globally topmost");
-if (codexCompanionSource.includes("Resolve-WatcherChatProject")) fail("Codex watcher must not substitute a remembered Project when the visible Project is unresolved");
-const codexWatchAddressIndex = codexCompanionSource.indexOf("$watchAddress = Get-BrowserAddressValue $watchPanel");
-const codexCloseIndex = codexCompanionSource.indexOf("if (Test-CompanionExitAddress $watchAddress)", codexWatchAddressIndex);
-const codexCreationIndex = codexCompanionSource.indexOf("$creationRequestId = Get-CompanionProjectCreationRequestId", codexCloseIndex);
-const codexProjectIndex = codexCompanionSource.indexOf("$activeProject = Get-ActiveChatProject $watchChat", codexCreationIndex);
-const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexProjectIndex);
-if (
-  codexWatchAddressIndex < 0 ||
-  codexCloseIndex <= codexWatchAddressIndex ||
-  codexCreationIndex <= codexCloseIndex ||
-  codexProjectIndex <= codexCreationIndex ||
-  codexDeletionIndex <= codexProjectIndex
-) {
-  fail("Codex companion must restore on close, capture a context-matched approved creation before transient Project resolution, and keep deletion behind Project isolation");
+for (const forbidden of ["open-cogentstack-companion.ps1", "hide-codex-sidebar.ps1", "ensure-cogentstack.ps1", "surface=chatgpt"]) {
+  if (codexSkillSource.includes(forbidden)) fail(`Codex web-first skill contains retired companion behavior: ${forbidden}`);
 }
-const projectMismatchStart = codexCompanionSource.indexOf("if ($observedProjectKey -ne $rememberedProjectKey)");
-const projectMismatchEnd = codexCompanionSource.indexOf("$pendingProjectKey = $null", projectMismatchStart);
-const projectMismatchBranch = codexCompanionSource.slice(projectMismatchStart, projectMismatchEnd);
-if (projectMismatchStart < 0 || projectMismatchEnd <= projectMismatchStart) fail("Codex companion is missing its Project-mismatch isolation branch");
-if (!projectMismatchBranch.includes("Suspend-CompanionLayout $watchState $true 'inactive-project' $true")) fail("Codex companion must restore and maximize the ordinary browser when another ChatGPT Project becomes visible");
-for (const forbidden of ["Find-ContextBinding", "context-switch", "-Name chatProjectKey", "-Name contextKey", "-Name workspaceUrl"]) {
-  if (projectMismatchBranch.includes(forbidden)) fail(`Codex companion must not switch its running session to another Project: ${forbidden}`);
+for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion"]) {
+  if (!codexBridgeSource.includes(marker)) fail(`Codex Desktop Bridge starter is missing required marker: ${marker}`);
 }
-if (!codexCompanionSource.includes("$handledCreationRequests.Add($creationRequestId)")) fail("Codex companion must start each approved creation request once");
-if (!codexCompanionSource.includes("if (-not $creationStarted)")) fail("Codex companion may navigate only to expose a worker-start failure");
-if (codexCompanionSource.includes("desktop_creation=$(if ($creationStarted)")) fail("Codex companion must not refresh the creation form after starting its worker");
+for (const forbidden of ["--app", "--new-window", "SetWindowPos", "SW_MAXIMIZE"]) {
+  if (codexBridgeSource.includes(forbidden)) fail(`Codex Desktop Bridge starter contains browser/window behavior: ${forbidden}`);
+}
+for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_project", "preview_project"]) {
+  if (!codexWatcherSource.includes(marker)) fail(`Codex Desktop Bridge watcher is missing required action marker: ${marker}`);
+}
 
 const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
 for (const marker of ["Get-Process -Name Claude", "Hide sidebar", "Show sidebar", "already_hidden"]) {
@@ -334,7 +257,7 @@ const parityPairs = [
     ["claude-desktop-authorization.json", "desktop-authorization.json"],
     ["claude-desktop-credential.json", "desktop-credential.json"],
     ["Claude Code Desktop on Windows", "ChatGPT Desktop on Windows"],
-    ["surface=claude-desktop", "surface=chatgpt"],
+    ["?surface=claude-desktop", ""],
   ]],
   ["fulfil-project.ps1", [["claude-desktop-credential.json", "desktop-credential.json"]]],
   ["delete-project.ps1", [["claude-desktop-credential.json", "desktop-credential.json"]]],

@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 $protocol = 'trusted-marketplace-v3'
 $marketplaceName = 'cogentstack'
 $marketplaceSource = 'https://github.com/Paulanthonydutton/cogentstack-marketplace.git'
-$workspaceUrl = 'https://cogentstack.app/stack?surface=chatgpt'
+$workspaceUrl = 'https://cogentstack.app/stack'
 $requiredSparsePaths = @('.agents/plugins', 'plugins/cogentstack')
 $timer = [Diagnostics.Stopwatch]::StartNew()
 $privateInstallationRequest = [string]$InstallationRequest
@@ -179,7 +179,7 @@ try {
         $workspaceUrl
     }
     if ($finalUrl -ne $workspaceUrl) {
-        throw 'The CogentStack workspace redirected instead of returning the official ChatGPT surface.'
+        throw 'The CogentStack workspace redirected instead of returning the official web workspace.'
     }
     if ($response.Content -notmatch 'Creating a Project:' -or $response.Content -notmatch 'Find a project type') {
         throw 'The CogentStack workspace is missing a required project-creation marker.'
@@ -238,15 +238,14 @@ try {
         'skills/cogentstack/agents/openai.yaml',
         'skills/cogentstack/scripts/connect-cogentstack.ps1',
         'skills/cogentstack/scripts/delete-project.ps1',
-        'skills/cogentstack/scripts/ensure-cogentstack.ps1',
         'skills/cogentstack/scripts/fulfil-project.ps1',
         'skills/cogentstack/scripts/generate-project-preview.ps1',
-        'skills/cogentstack/scripts/hide-codex-sidebar.ps1',
         'skills/cogentstack/scripts/native-command.ps1',
-        'skills/cogentstack/scripts/open-cogentstack-companion.ps1',
         'skills/cogentstack/scripts/prepare-deployment.ps1',
         'skills/cogentstack/scripts/project-context.ps1',
         'skills/cogentstack/scripts/project-knowledge.ps1',
+        'skills/cogentstack/scripts/start-cogentstack-bridge.ps1',
+        'skills/cogentstack/scripts/watch-cogentstack-bridge.ps1',
         'skills/cogentstack/SKILL.md'
     )
     $actualFiles = @(Get-ChildItem -LiteralPath $installedPath -Recurse -Force -File | ForEach-Object {
@@ -268,34 +267,31 @@ try {
     Set-InstallStage -Name 'launcher_contract_verification'
     $skillText = Get-Content -LiteralPath (Join-Path $installedPath 'skills\cogentstack\SKILL.md') -Raw
     $requiredSkillStatements = @(
-        'Run `scripts/ensure-cogentstack.ps1 -Mode Companion` exactly once.',
-        'run `scripts/hide-codex-sidebar.ps1` exactly once before arranging the windows.',
-        'run `scripts/open-cogentstack-companion.ps1 -Mode Open -Url <exact returned URL>` exactly once.',
-        '`browserContentMode: page-only`',
-        '`browserChromeHidden: true`',
-        '`browserContentClipped: true`',
-        '`gutter: 12`',
-        '`separated: true`',
-        '`whiteDivider: true`',
-        '`dividerMasksShadows: true`',
-        '`layoutVerified: true`',
-        'The companion header presents **−**, **+**, and **X** in that order.',
-        'Use the embedded mode only when the user explicitly asks to keep CogentStack inside Codex',
-        '`placement` set to `right`'
+        'Run `scripts/project-context.ps1` exactly once',
+        'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context>` exactly once.',
+        'This helper performs the one account-status check itself.',
+        '`browserOpened: false`',
+        'Do not open it, call a browser-control tool, create or select a browser tab',
+        'Qwen Desktop is an optional CogentStack-owned integrated application and includes the same Bridge',
+        'queues `create_project` for Desktop Bridge',
+        'queues `preview_project` for Desktop Bridge',
+        'queues `delete_project` immediately'
     )
     foreach ($statement in $requiredSkillStatements) {
         if (-not $skillText.Contains($statement)) {
-            throw 'The installed launcher skill is missing a required companion or optional-panel guarantee.'
+            throw 'The installed launcher skill is missing a required web-first Desktop Bridge guarantee.'
         }
     }
 
-    $companionScript = Get-Content -LiteralPath (Join-Path $installedPath 'skills\cogentstack\scripts\open-cogentstack-companion.ps1') -Raw
-    if ($companionScript.Contains('--app') -or $companionScript.Contains('--new-window')) {
-        throw 'The companion helper contains a prohibited browser-window launch flag.'
+    $bridgeScript = Get-Content -LiteralPath (Join-Path $installedPath 'skills\cogentstack\scripts\start-cogentstack-bridge.ps1') -Raw
+    foreach ($prohibitedMarker in @('Start-Process ([string]$workspaceUrl', '--app', '--new-window', 'SetWindowPos', 'SW_MAXIMIZE')) {
+        if ($bridgeScript.Contains($prohibitedMarker)) {
+            throw 'The Desktop Bridge launcher contains a prohibited browser or window-arrangement action.'
+        }
     }
-    foreach ($requiredMarker in @('companion=suspend', 'companion=resume', 'whiteDivider', 'dividerMasksShadows', 'SW_MAXIMIZE')) {
-        if (-not $companionScript.Contains($requiredMarker)) {
-            throw 'The companion helper is missing a required reversible-layout marker.'
+    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", 'start-cogentstack-bridge.ps1')) {
+        if (-not ($bridgeScript.Contains($requiredMarker) -or $skillText.Contains($requiredMarker))) {
+            throw 'The Desktop Bridge launcher is missing a required web-first connection marker.'
         }
     }
     Complete-InstallStage

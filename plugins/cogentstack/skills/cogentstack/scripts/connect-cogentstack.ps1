@@ -255,7 +255,7 @@ if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $res
 Save-CogentStackCredential $result
 Remove-Item -LiteralPath $pendingPath -Force
 
-$workspaceUrl = "$serviceUrl/stack?surface=chatgpt#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
+$workspaceUrl = "$serviceUrl/stack#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
 Write-CompactJson ([ordered]@{
     status = 'authorized'
     email = [string]$result.subscriber.email
