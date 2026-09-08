@@ -1,7 +1,9 @@
 param(
-    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'Suspend', 'Resume', 'Toggle', 'InstallToggle', 'WatchExit')]
+    [ValidateSet('Inspect', 'Open', 'Hide', 'Close', 'Suspend', 'Resume', 'Toggle', 'InstallToggle', 'WatchExit', 'CreateProjectWorker')]
     [string]$Mode = 'Open',
-    [string]$Url = 'https://cogentstack.app/stack?surface=chatgpt'
+    [string]$Url = 'https://cogentstack.app/stack?surface=chatgpt',
+    [string]$RequestId = '',
+    [string]$ContextKey = ''
 )
 
 Set-StrictMode -Version Latest
@@ -437,6 +439,30 @@ function Resolve-ChatProjectForOpen($VisibleProject, $HostProjectContext, [strin
         }
         stableContextFallbackUsed = $true
         stableContextBindingPending = -not [bool]$RememberedContextBinding
+    }
+}
+
+function Resolve-WatcherChatProject($ActiveProject, $WatchState) {
+    if ($ActiveProject.resolved) { return $ActiveProject }
+    $stableContextAuthoritative = [bool](
+        $WatchState -and
+        $WatchState.PSObject.Properties['chatProjectStableContextFallback'] -and
+        [bool]$WatchState.chatProjectStableContextFallback -and
+        $WatchState.PSObject.Properties['contextKey'] -and
+        [string]$WatchState.contextKey -match '^ctx-[0-9a-f]{64}$'
+    )
+    if (-not $stableContextAuthoritative) { return $ActiveProject }
+    $rememberedProjectKey = if ($WatchState.PSObject.Properties['chatProjectKey']) {
+        [string]$WatchState.chatProjectKey
+    } else {
+        Get-StableChatProjectKeyFromContext ([string]$WatchState.contextKey)
+    }
+    if (-not $rememberedProjectKey) { return $ActiveProject }
+    return [ordered]@{
+        resolved = $true
+        key = $rememberedProjectKey
+        source = 'stable-project-context-watcher'
+        attempts = if ($ActiveProject.Contains('attempts')) { [int]$ActiveProject.attempts } else { 1 }
     }
 }
 
@@ -894,6 +920,17 @@ function Test-CompanionProjectDeletionAddress([string]$Address) {
     return $null -ne $parsed -and
         $parsed.AbsolutePath.TrimEnd('/') -eq '/stack' -and
         $parsed.Query -match '(?i)(?:^|[?&])desktop_action=delete_project(?:&|$)'
+}
+
+function Get-CompanionProjectCreationRequestId([string]$Address) {
+    $parsed = ConvertTo-CogentStackUri $Address
+    if ($null -eq $parsed -or $parsed.AbsolutePath.TrimEnd('/') -ne '/stack' -or
+        $parsed.Query -notmatch '(?i)(?:^|[?&])desktop_action=create_project(?:&|$)') {
+        return ''
+    }
+    $requestMatch = [regex]::Match($parsed.Query, '(?i)(?:^|[?&])desktop_request=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:&|$)')
+    if (-not $requestMatch.Success) { return '' }
+    return $requestMatch.Groups[1].Value.ToLowerInvariant()
 }
 
 function Test-CompanionOwnedAddress([string]$Address) {
@@ -1790,6 +1827,32 @@ function Start-CompanionExitWatcher {
     ) -WindowStyle Hidden -PassThru
 }
 
+function Start-ApprovedProjectCreationWorker([string]$ApprovedRequestId, [string]$ApprovedContextKey) {
+    if ($ApprovedRequestId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { return $false }
+    if ($ApprovedContextKey -ne 'default' -and $ApprovedContextKey -notmatch '^ctx-[0-9a-f]{64}$') { return $false }
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $powershellCommand) { return $false }
+    try {
+        $worker = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $PSCommandPath,
+            '-Mode',
+            'CreateProjectWorker',
+            '-RequestId',
+            $ApprovedRequestId,
+            '-ContextKey',
+            $ApprovedContextKey
+        ) -WindowStyle Hidden -PassThru
+        return $null -ne $worker
+    } catch {
+        return $false
+    }
+}
+
 function Invoke-ApprovedProjectDeletion([string]$ContextKey = 'default') {
     $deleteScript = Join-Path $PSScriptRoot 'delete-project.ps1'
     if (-not (Test-Path -LiteralPath $deleteScript -PathType Leaf)) { return $false }
@@ -1805,6 +1868,33 @@ function Invoke-ApprovedProjectDeletion([string]$ContextKey = 'default') {
             $deleteScript,
             '-Mode',
             'delete',
+            '-ContextKey',
+            $ContextKey
+        ) -WindowStyle Hidden -Wait -PassThru
+        return $process.ExitCode -eq 0
+    } catch {
+        return $false
+    }
+}
+
+function Invoke-ApprovedProjectCreation([string]$RequestId, [string]$ContextKey = 'default') {
+    if ($RequestId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { return $false }
+    $creationScript = Join-Path $PSScriptRoot 'fulfil-project.ps1'
+    if (-not (Test-Path -LiteralPath $creationScript -PathType Leaf)) { return $false }
+    $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $powershellCommand) { return $false }
+    try {
+        $process = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $creationScript,
+            '-Mode',
+            'create',
+            '-RequestId',
+            $RequestId,
             '-ContextKey',
             $ContextKey
         ) -WindowStyle Hidden -Wait -PassThru
@@ -1897,6 +1987,29 @@ if ($Mode -eq 'Toggle') {
     exit $(if ($toggle.status -eq 'cold_start_required') { 2 } else { 0 })
 }
 
+if ($Mode -eq 'CreateProjectWorker') {
+    $creationMutex = New-Object System.Threading.Mutex($false, 'Local\CogentStackCompanionProjectCreation')
+    $ownsCreationMutex = $false
+    try {
+        $ownsCreationMutex = $creationMutex.WaitOne(0)
+        if (-not $ownsCreationMutex) { exit 0 }
+        $created = Invoke-ApprovedProjectCreation $RequestId $ContextKey
+        $workerState = Read-LayoutState
+        $workerPanel = if ($workerState) { Find-RememberedWindow $workerState 'panel' } else { $null }
+        if ($workerState -and $workerPanel) {
+            $returnUrl = [string]$workerState.workspaceUrl
+            if (-not $created) {
+                $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_creation=failed&desktop_request=$RequestId"
+            }
+            Set-BrowserWorkspaceAddress $workerPanel $returnUrl | Out-Null
+        }
+        exit $(if ($created) { 0 } else { 1 })
+    } finally {
+        if ($ownsCreationMutex) { $creationMutex.ReleaseMutex() }
+        $creationMutex.Dispose()
+    }
+}
+
 if ($Mode -eq 'WatchExit') {
     $watcherMutex = New-Object System.Threading.Mutex($false, 'Local\CogentStackCompanionExitWatcher')
     $ownsMutex = $false
@@ -1910,23 +2023,16 @@ if ($Mode -eq 'WatchExit') {
             if (-not $watchState) { break }
             $watchPanel = Find-RememberedWindow $watchState 'panel'
             if (-not $watchPanel) { break }
+            $watchAddress = Get-BrowserAddressValue $watchPanel
+            if (Test-CompanionExitAddress $watchAddress) {
+                Restore-CompanionLayout $watchState $false $true $true | Out-Null
+                break
+            }
             $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
             $watchChat = Find-RememberedWindow $watchState 'chatDesktop'
-            $activeProject = Get-ActiveChatProject $watchChat
+            $activeProject = Resolve-WatcherChatProject (Get-ActiveChatProject $watchChat) $watchState
             $rememberedProjectKey = if ($watchState.PSObject.Properties['chatProjectKey']) { [string]$watchState.chatProjectKey } else { '' }
             if (-not $activeProject.resolved) {
-                $stableContextAuthoritative = [bool](
-                    $watchState.PSObject.Properties['chatProjectStableContextFallback'] -and
-                    [bool]$watchState.chatProjectStableContextFallback -and
-                    $watchState.PSObject.Properties['contextKey'] -and
-                    [string]$watchState.contextKey -match '^ctx-[0-9a-f]{64}$'
-                )
-                if ($stableContextAuthoritative) {
-                    $pendingProjectKey = $null
-                    $pendingProjectCount = 0
-                    Start-Sleep -Milliseconds 250
-                    continue
-                }
                 if ($pendingProjectKey -eq 'unresolved') { $pendingProjectCount++ } else {
                     $pendingProjectKey = 'unresolved'
                     $pendingProjectCount = 1
@@ -2025,6 +2131,16 @@ if ($Mode -eq 'WatchExit') {
                 continue
             }
             $watchAddress = Get-BrowserAddressValue $watchPanel
+            $creationRequestId = Get-CompanionProjectCreationRequestId $watchAddress
+            if ($creationRequestId) {
+                $watchContextKey = if ($watchState.PSObject.Properties['contextKey']) { [string]$watchState.contextKey } else { 'default' }
+                $creationStarted = Start-ApprovedProjectCreationWorker $creationRequestId $watchContextKey
+                $returnUrl = [string]$watchState.workspaceUrl
+                $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_creation=$(if ($creationStarted) { 'started' } else { 'failed' })&desktop_request=$creationRequestId"
+                Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
+                Start-Sleep -Milliseconds 500
+                continue
+            }
             if (Test-CompanionProjectDeletionAddress $watchAddress) {
                 $watchContextKey = if ($watchState.PSObject.Properties['contextKey']) { [string]$watchState.contextKey } else { 'default' }
                 $deleted = Invoke-ApprovedProjectDeletion $watchContextKey
@@ -2066,10 +2182,6 @@ if ($Mode -eq 'WatchExit') {
                 } else {
                     [CogentStackWorkspaceWindows]::ShowWindow([IntPtr]$watchDivider.Handle, 0) | Out-Null
                 }
-            }
-            if (Test-CompanionExitAddress $watchAddress) {
-                Restore-CompanionLayout $watchState $false $true $true | Out-Null
-                break
             }
             if (Test-CompanionResumeAddress $watchAddress) {
                 Resume-CompanionLayout $watchState | Out-Null

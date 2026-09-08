@@ -297,11 +297,19 @@ for (const marker of [
   if (!codexCompanionSource.includes(marker)) fail(`Codex companion helper is missing navigation recovery marker: ${marker}`);
 }
 if (codexCompanionSource.includes("TopMost = `$true")) fail("Codex divider must not be globally topmost");
-const codexProjectIndex = codexCompanionSource.indexOf("$activeProject = Get-ActiveChatProject $watchChat");
-const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexProjectIndex);
-const codexWatchAddressIndex = codexCompanionSource.lastIndexOf("$watchAddress = Get-BrowserAddressValue $watchPanel", codexDeletionIndex);
-if (codexProjectIndex < 0 || codexWatchAddressIndex <= codexProjectIndex || codexDeletionIndex <= codexWatchAddressIndex) {
-  fail("Codex companion must confirm the active ChatGPT Project before processing its normalized browser address");
+const codexWatchAddressIndex = codexCompanionSource.indexOf("$watchAddress = Get-BrowserAddressValue $watchPanel");
+const codexCloseIndex = codexCompanionSource.indexOf("if (Test-CompanionExitAddress $watchAddress)", codexWatchAddressIndex);
+const codexProjectIndex = codexCompanionSource.indexOf("$activeProject = Resolve-WatcherChatProject", codexCloseIndex);
+const codexCreationIndex = codexCompanionSource.indexOf("$creationRequestId = Get-CompanionProjectCreationRequestId", codexProjectIndex);
+const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexCreationIndex);
+if (
+  codexWatchAddressIndex < 0 ||
+  codexCloseIndex <= codexWatchAddressIndex ||
+  codexProjectIndex <= codexCloseIndex ||
+  codexCreationIndex <= codexProjectIndex ||
+  codexDeletionIndex <= codexCreationIndex
+) {
+  fail("Codex companion must restore on close before optional Project resolution, then process creation and deletion only after Project isolation");
 }
 
 const sidebarSource = await readFile(join(scriptsRoot, "hide-claude-sidebar.ps1"), "utf8");
