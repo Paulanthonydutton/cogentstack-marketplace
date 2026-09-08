@@ -89,9 +89,10 @@ for (const name of requiredScripts) {
 }
 
 const bridge = await readFile(join(scriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion"]) {
+for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))"]) {
   if (!bridge.includes(marker)) fail(`Desktop Bridge starter is missing required marker: ${marker}`);
 }
+if (!skill.includes("-Surface claude-desktop")) fail("Claude launcher must identify its desktop surface");
 for (const forbidden of ["--app", "--new-window", "SetWindowPos", "SW_MAXIMIZE"]) {
   if (bridge.includes(forbidden)) fail(`Desktop Bridge starter contains browser/window behavior: ${forbidden}`);
 }

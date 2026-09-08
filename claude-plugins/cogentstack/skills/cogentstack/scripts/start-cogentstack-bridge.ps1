@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$ContextKey = ''
+    [string]$ContextKey = '',
+
+    [ValidateSet('chatgpt', 'claude-desktop')]
+    [string]$Surface = 'chatgpt'
 )
 
 Set-StrictMode -Version Latest
@@ -22,7 +25,7 @@ function Get-TextSha256([string]$Value) {
 
 $projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
 $resolvedContext = [string]$projectContext.ContextKey
-$workspaceUrl = "https://cogentstack.app/stack?context=$([Uri]::EscapeDataString($resolvedContext))"
+$workspaceUrl = "https://cogentstack.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
 $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
 $sourceScriptNames = @(
     'connect-cogentstack.ps1',
@@ -39,7 +42,7 @@ if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($source
 
 $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $powershellCommand) { throw 'Windows PowerShell is required by Desktop Bridge.' }
-$connectionOutput = @(& ([string]$powershellCommand.Source) -NoProfile -ExecutionPolicy Bypass -File $connectionScript -Mode status 2>&1)
+$connectionOutput = @(& ([string]$powershellCommand.Source) -NoProfile -ExecutionPolicy Bypass -File $connectionScript -Mode status -Surface $Surface 2>&1)
 $connectionJson = @($connectionOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
 if (-not $connectionJson) { throw 'Desktop Bridge could not verify the account-bound installation.' }
 $connection = $connectionJson | ConvertFrom-Json

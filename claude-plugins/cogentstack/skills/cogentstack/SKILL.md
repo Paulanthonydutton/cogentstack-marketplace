@@ -14,7 +14,7 @@ Use `${CLAUDE_PLUGIN_ROOT}` for every bundled script path. Run project-context, 
 Treat `$cogentstack`, a direct skill invocation, and a natural-language request to connect CogentStack as the same request.
 
 1. Run `${CLAUDE_PLUGIN_ROOT}\skills\cogentstack\scripts\project-context.ps1` exactly once. Require an isolated context derived from the current Claude project or its bounded workspace. Never guess from a conversation title or use the plugin cache as identity.
-2. Run `${CLAUDE_PLUGIN_ROOT}\skills\cogentstack\scripts\start-cogentstack-bridge.ps1 -ContextKey <resolved context>` exactly once. This helper performs the one account-status check. Require `status: ready`, the same `contextKey`, `accountState: signed_in`, and `browserOpened: false`. Accept `bridge: started` or `bridge: already_running`.
+2. Run `${CLAUDE_PLUGIN_ROOT}\skills\cogentstack\scripts\start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface claude-desktop` exactly once. This helper performs the one account-status check. Require `status: ready`, the same `contextKey`, `accountState: signed_in`, and `browserOpened: false`. Accept `bridge: started` or `bridge: already_running`.
 3. Return the exact `workspaceUrl` as a clickable link. Do not open it, call browser control, create or select a browser tab, inspect browser profiles, hide the Claude sidebar, resize either window, or create an embedded companion panel. The user decides when and where to open the web workspace.
 4. If the helper returns `signed_out`, explain its exact narrow reason and direct the user to `https://cogentstack.app/install`. Never request a CogentStack login, licence key, activation code, legal confirmation, account-bound reference, or Desktop credential in the conversation.
 

@@ -1,6 +1,6 @@
 {
   "name": "cogentstack",
-  "version": "0.5.0+codex.20260908193000",
+  "version": "0.5.0+codex.20260908202540",
   "description": "Connect isolated AI project contexts to CogentStack Web through one account-bound Desktop Bridge, restore portable Git-backed knowledge, and execute approved local actions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
