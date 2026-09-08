@@ -5,12 +5,16 @@ param(
     [string]$RequestId = '',
     [string]$TargetPath = '',
     [string]$LocalUrl = '',
-    [int]$ProcessId = 0
+    [int]$ProcessId = 0,
+    [string]$ContextKey = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'native-command.ps1')
+. (Join-Path $PSScriptRoot 'project-context.ps1')
+$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
+$contextQuery = "context=$([Uri]::EscapeDataString($projectContext.ContextKey))"
 
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     try {
@@ -145,7 +149,7 @@ function Find-ProjectPreview([string]$ExactTargetPath, [string[]]$RememberedUrls
 }
 
 function Report-PreviewState([string]$Token, [string]$ExactRequestId, [string]$ExactTargetPath, [string]$State, [string]$Url, [int]$ListenerProcessId) {
-    return Invoke-CogentStackApi -Method Put -Path '/api/plugin/project-runtime' -Token $Token -Body @{
+    return Invoke-CogentStackApi -Method Put -Path "/api/plugin/project-runtime?$contextQuery" -Token $Token -Body @{
         requestId = $ExactRequestId
         targetPath = $ExactTargetPath
         state = $State
@@ -218,7 +222,7 @@ if (-not $token) {
 }
 
 try {
-    $listing = Invoke-CogentStackApi -Method Get -Path '/api/plugin/project-runtime' -Token $token
+    $listing = Invoke-CogentStackApi -Method Get -Path "/api/plugin/project-runtime?$contextQuery" -Token $token
 } catch {
     $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
     if ($statusCode -eq 401) {

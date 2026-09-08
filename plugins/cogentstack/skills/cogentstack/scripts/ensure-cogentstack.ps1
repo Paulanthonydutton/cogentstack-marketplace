@@ -1,13 +1,16 @@
 param(
     [ValidateSet('Companion', 'Embedded')]
-    [string]$Mode = 'Companion'
+    [string]$Mode = 'Companion',
+    [string]$ContextKey = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'project-context.ps1')
 
 $serviceUrl = 'https://cogentstack.app'
-$publicWorkspaceUrl = "$serviceUrl/stack?surface=chatgpt"
+$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
+$publicWorkspaceUrl = Add-CogentStackContextToPath "$serviceUrl/stack?surface=chatgpt" $projectContext.ContextKey
 $workspaceUrl = $publicWorkspaceUrl
 $response = Invoke-WebRequest -UseBasicParsing -Uri $publicWorkspaceUrl -Headers @{ Accept = 'text/html' } -TimeoutSec 15
 if ($response.StatusCode -ne 200) {
@@ -63,4 +66,5 @@ if ($Mode -eq 'Embedded' -and (Test-Path -LiteralPath $credentialPath)) {
     mode = $Mode.ToLowerInvariant()
     authenticated = $authenticated
     loginAuthority = $serviceUrl
+    context = [ordered]@{ key = $projectContext.ContextKey; source = $projectContext.Source; isolated = $projectContext.Isolated }
 } | ConvertTo-Json -Compress

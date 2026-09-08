@@ -1,12 +1,16 @@
 param(
     [ValidateSet('inspect', 'create')]
     [string]$Mode = 'inspect',
-    [string]$RequestId = ''
+    [string]$RequestId = '',
+    [string]$ContextKey = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'native-command.ps1')
+. (Join-Path $PSScriptRoot 'project-context.ps1')
+$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
+$contextQuery = "context=$([Uri]::EscapeDataString($projectContext.ContextKey))"
 
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     try {
@@ -104,7 +108,7 @@ if (-not (Test-Path -LiteralPath $credentialPath)) {
 $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
 $token = Unprotect-CogentStackValue ([string]$credential.token)
 try {
-    $listing = Invoke-CogentStackApi -Method Get -Path '/api/plugin/project-requests?status=requested&limit=20' -Token $token
+    $listing = Invoke-CogentStackApi -Method Get -Path "/api/plugin/project-requests?status=requested&limit=20&$contextQuery" -Token $token
 } catch {
     $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
     if ($statusCode -eq 401) {
@@ -148,7 +152,7 @@ $artifactDigest = ''
 $claimed = $false
 
 try {
-    $claim = Invoke-CogentStackApi -Method Post -Path '/api/plugin/project-requests' -Token $token -Body @{
+    $claim = Invoke-CogentStackApi -Method Post -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
         action = 'claim'
         requestId = $RequestId
     }
@@ -254,7 +258,7 @@ try {
     if ($gitRevisionResult.ExitCode -ne 0 -or -not $gitRevisionResult.Output) { throw 'Git baseline revision could not be read.' }
     $commit = $gitRevisionResult.Output
 
-    $completed = Invoke-CogentStackApi -Method Patch -Path '/api/plugin/project-requests' -Token $token -Body @{
+    $completed = Invoke-CogentStackApi -Method Patch -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
         action = 'complete'
         requestId = $RequestId
         artifactDigest = $artifactDigest
@@ -276,7 +280,7 @@ try {
     $message = $_.Exception.Message
     if ($claimed -and $executionGrant -and $artifactDigest) {
         try {
-            Invoke-CogentStackApi -Method Patch -Path '/api/plugin/project-requests' -Token $token -Body @{
+            Invoke-CogentStackApi -Method Patch -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
                 action = 'fail'
                 requestId = $RequestId
                 artifactDigest = $artifactDigest

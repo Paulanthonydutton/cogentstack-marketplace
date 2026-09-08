@@ -42,6 +42,14 @@ function Confirm-CogentStackUrl([string]$Candidate) {
     return $parsed.AbsoluteUri
 }
 
+function Get-CogentStackContextFromUrl([string]$Candidate) {
+    $match = [regex]::Match($Candidate, '(?i)(?:[?&])context=([^&#]+)')
+    if (-not $match.Success) { return 'default' }
+    $value = [Uri]::UnescapeDataString($match.Groups[1].Value).ToLowerInvariant()
+    if ($value -ne 'default' -and $value -notmatch '^ctx-[0-9a-f]{64}$') { throw 'The companion URL contains an invalid project context.' }
+    return $value
+}
+
 function Find-BrowserExecutable([string]$CommandName, [string[]]$Candidates) {
     $command = Get-Command $CommandName -ErrorAction SilentlyContinue
     if ($command) { return [string]$command.Source }
@@ -1506,7 +1514,7 @@ function Start-CompanionExitWatcher {
     ) -WindowStyle Hidden -PassThru
 }
 
-function Invoke-ApprovedProjectDeletion {
+function Invoke-ApprovedProjectDeletion([string]$ContextKey = 'default') {
     $deleteScript = Join-Path $PSScriptRoot 'delete-project.ps1'
     if (-not (Test-Path -LiteralPath $deleteScript -PathType Leaf)) { return $false }
     $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -1520,7 +1528,9 @@ function Invoke-ApprovedProjectDeletion {
             '-File',
             $deleteScript,
             '-Mode',
-            'delete'
+            'delete',
+            '-ContextKey',
+            $ContextKey
         ) -WindowStyle Hidden -Wait -PassThru
         return $process.ExitCode -eq 0
     } catch {
@@ -1612,7 +1622,8 @@ if ($Mode -eq 'WatchExit') {
             if (-not $watchPanel) { break }
             $watchAddress = Get-BrowserAddressValue $watchPanel
             if (Test-CompanionProjectDeletionAddress $watchAddress) {
-                $deleted = Invoke-ApprovedProjectDeletion
+                $watchContextKey = if ($watchState.PSObject.Properties['contextKey']) { [string]$watchState.contextKey } else { 'default' }
+                $deleted = Invoke-ApprovedProjectDeletion $watchContextKey
                 $returnUrl = [string]$watchState.workspaceUrl
                 if (-not $deleted) {
                     $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_deletion=failed"
@@ -1741,6 +1752,7 @@ if ($Mode -eq 'Close') {
 }
 
 $safeUrl = Confirm-CogentStackUrl $Url
+$requestedContextKey = Get-CogentStackContextFromUrl $safeUrl
 if ($browsers.Count -eq 0) {
     Write-CompactJson ([ordered]@{
         status = 'browser_unavailable'
@@ -1753,6 +1765,13 @@ $openMutex = Enter-CompanionOpenMutex
 try {
     # The remembered verified workspace is authoritative. Reusing it avoids any
     # browser-wide discovery and does not touch other browser tabs.
+    if ($state) {
+        $rememberedContextKey = if ($state.PSObject.Properties['contextKey']) { [string]$state.contextKey } else { 'default' }
+        if ($rememberedContextKey -ne $requestedContextKey) {
+            Restore-CompanionLayout $state $false $true $false | Out-Null
+            $state = $null
+        }
+    }
     if ($state) {
         $rememberedPanelBeforeResume = Find-RememberedWindow $state 'panel'
         $rememberedWorkspaceAlreadySelected = [bool]($rememberedPanelBeforeResume -and (Test-CogentStackWorkspaceAddress (Get-BrowserAddressValue $rememberedPanelBeforeResume)))
@@ -1804,7 +1823,8 @@ try {
         }
         $candidateTabsActivated = if ([bool]$panelSelection.Activated) { 1 } else { 0 }
         $reusedExistingHomeTab = [bool]$panelSelection.IsHome
-        if (-not [bool]$panelSelection.IsWorkspace) {
+        $selectedContextKey = Get-CogentStackContextFromUrl (Get-BrowserAddressValue $panelSelection.Window)
+        if (-not [bool]$panelSelection.IsWorkspace -or $selectedContextKey -ne $requestedContextKey) {
             if (-not (Set-BrowserWorkspaceAddress $panelSelection.Window $safeUrl)) {
                 Write-CompactJson ([ordered]@{
                     status = 'opened_unarranged'
@@ -1945,7 +1965,7 @@ $headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
 $layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 $layoutState = [ordered]@{
-    schemaVersion = 11
+    schemaVersion = 12
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
@@ -1971,6 +1991,7 @@ $layoutState = [ordered]@{
     gutter = $gutter
     accountState = [string]$panelSelection.AccountState
     workspaceUrl = $safeUrl
+    contextKey = $requestedContextKey
     layoutStatus = 'active'
     updatedAt = [DateTimeOffset]::UtcNow.ToString('O')
 }
@@ -2029,6 +2050,7 @@ Write-CompactJson ([ordered]@{
     tabResolution = $tabResolution
     candidateTabsActivated = $candidateTabsActivated
     accountState = [string]$panelSelection.AccountState
+    contextKey = $requestedContextKey
     chatFrame = $layout.chat
     panelFrame = $layout.panel
     browserWindowFrame = $pageOnly.windowFrame

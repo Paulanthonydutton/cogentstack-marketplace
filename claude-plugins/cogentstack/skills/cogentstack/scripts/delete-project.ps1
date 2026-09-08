@@ -1,11 +1,15 @@
 param(
     [ValidateSet('inspect', 'delete')]
     [string]$Mode = 'inspect',
-    [string]$RequestId = ''
+    [string]$RequestId = '',
+    [string]$ContextKey = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'project-context.ps1')
+$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
+$contextQuery = "context=$([Uri]::EscapeDataString($projectContext.ContextKey))"
 
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     try {
@@ -190,7 +194,7 @@ if (-not (Test-Path -LiteralPath $credentialPath)) {
 
 $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
 $token = Unprotect-CogentStackValue ([string]$credential.token)
-$listing = Invoke-CogentStackApi -Method Get -Path '/api/plugin/project-deletions' -Token $token
+$listing = Invoke-CogentStackApi -Method Get -Path "/api/plugin/project-deletions?$contextQuery" -Token $token
 $requests = @($listing.requests)
 
 if ($Mode -eq 'inspect') {
@@ -232,7 +236,7 @@ $folderRemoved = $false
 $processesStopped = 0
 
 try {
-    $claim = Invoke-CogentStackApi -Method Post -Path '/api/plugin/project-deletions' -Token $token -Body @{
+    $claim = Invoke-CogentStackApi -Method Post -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
         action = 'claim'
         requestId = $RequestId
     }
@@ -274,7 +278,7 @@ try {
     $completed = $null
     for ($attempt = 1; $attempt -le 3 -and $null -eq $completed; $attempt++) {
         try {
-            $completed = Invoke-CogentStackApi -Method Patch -Path '/api/plugin/project-deletions' -Token $token -Body @{
+            $completed = Invoke-CogentStackApi -Method Patch -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
                 action = 'complete'
                 requestId = $RequestId
                 deletionDigest = $deletionDigest
@@ -282,7 +286,7 @@ try {
                 statusMessage = $completionMessage
             }
         } catch {
-            $remainingRequests = @((Invoke-CogentStackApi -Method Get -Path '/api/plugin/project-deletions' -Token $token).requests)
+            $remainingRequests = @((Invoke-CogentStackApi -Method Get -Path "/api/plugin/project-deletions?$contextQuery" -Token $token).requests)
             if (-not ($remainingRequests | Where-Object { [string]$_.id -eq $RequestId })) {
                 $completed = [pscustomobject]@{ status = 'deleted' }
                 break
@@ -308,7 +312,7 @@ try {
     $message = $_.Exception.Message
     if ($claimed -and $executionGrant -and $deletionDigest) {
         try {
-            Invoke-CogentStackApi -Method Patch -Path '/api/plugin/project-deletions' -Token $token -Body @{
+            Invoke-CogentStackApi -Method Patch -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
                 action = 'fail'
                 requestId = $RequestId
                 deletionDigest = $deletionDigest

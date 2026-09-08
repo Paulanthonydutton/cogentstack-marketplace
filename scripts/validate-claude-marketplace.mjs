@@ -58,6 +58,7 @@ const requiredScripts = [
   "native-command.ps1",
   "open-cogentstack-panel.ps1",
   "prepare-deployment.ps1",
+  "project-context.ps1",
 ];
 const actualScripts = (await readdir(scriptsRoot)).filter((name) => name.endsWith(".ps1")).sort();
 if (JSON.stringify(actualScripts) !== JSON.stringify([...requiredScripts].sort())) {
@@ -192,12 +193,15 @@ const validateExistingTabReuse = (source, label) => {
     "$selectedHome",
     "$homeWindow",
     "if (-not $isWorkspaceTitle -and -not $isHomeTitle) { continue }",
-    "if (-not [bool]$panelSelection.IsWorkspace)",
     "reusedExistingHomeTab = $reusedExistingHomeTab",
     "tabResolution = $tabResolution",
     "candidateTabsActivated = $candidateTabsActivated",
   ]) {
     if (!source.includes(marker)) fail(`${label} helper is missing existing-tab reuse marker: ${marker}`);
+  }
+  if (!source.includes("if (-not [bool]$panelSelection.IsWorkspace)")
+    && !source.includes("if (-not [bool]$panelSelection.IsWorkspace -or $selectedContextKey -ne $requestedContextKey)")) {
+    fail(`${label} helper is missing existing workspace navigation and context-switch handling`);
   }
   if (source.includes("reusedExistingTab = [bool]$panelSelection.ReusedExistingTab")) {
     fail(`${label} helper still reports a newly opened tab as reused`);
@@ -265,7 +269,7 @@ for (const marker of [
   "$activeLayout.verified",
   "ShowWindow([IntPtr]$watchDivider.Handle, 0)",
   "$parsed = ConvertTo-CogentStackUri $Address",
-  "schemaVersion = 11",
+  "schemaVersion = 12",
   "$watchAddress -and -not (Test-CompanionOwnedAddress $watchAddress)",
   "($Mode -eq 'Close')",
 ]) {

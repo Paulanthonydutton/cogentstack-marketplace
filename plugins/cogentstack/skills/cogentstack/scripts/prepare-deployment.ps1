@@ -1,5 +1,7 @@
-param([ValidateSet("inspect", "prepare")][string]$Mode = "prepare", [string]$RequestId = "")
+param([ValidateSet("inspect", "prepare")][string]$Mode = "prepare", [string]$RequestId = "", [string]$ContextKey = "")
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'project-context.ps1')
+$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
 $BaseUrl = "https://cogentstack.app"
 $CredentialPath = Join-Path $env:LOCALAPPDATA "CogentStack\desktop-credential.json"
 
@@ -12,7 +14,7 @@ function Read-Credential {
 }
 
 function Invoke-Api([string]$Method, [string]$Token, [object]$Body = $null) {
-  $arguments = @{ Uri = "$BaseUrl/api/plugin/deployment-packs"; Method = $Method; Headers = @{ Authorization = "Bearer $Token"; Accept = "application/json" }; UseBasicParsing = $true }
+  $arguments = @{ Uri = "$BaseUrl/api/plugin/deployment-packs?context=$([Uri]::EscapeDataString($projectContext.ContextKey))"; Method = $Method; Headers = @{ Authorization = "Bearer $Token"; Accept = "application/json" }; UseBasicParsing = $true }
   if ($null -ne $Body) { $arguments.ContentType = "application/json"; $arguments.Body = ($Body | ConvertTo-Json -Depth 8 -Compress) }
   return Invoke-RestMethod @arguments
 }
