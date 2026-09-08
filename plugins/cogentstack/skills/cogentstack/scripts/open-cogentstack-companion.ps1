@@ -369,8 +369,40 @@ function Find-ContextBindingByContext([string]$ContextKey) {
     }; Descending = $true } | Select-Object -First 1)
 }
 
-function Resolve-ChatProjectForOpen($VisibleProject, $HostProjectContext, [string]$RequestedContextKey, $RememberedContextBinding) {
+function Resolve-ChatProjectForOpen($VisibleProject, $HostProjectContext, [string]$RequestedContextKey, $RememberedContextBinding, $VisibleProjectBinding) {
+    if ([bool]$HostProjectContext.Isolated -and [string]$HostProjectContext.ContextKey -ne $RequestedContextKey) {
+        return [pscustomobject][ordered]@{
+            project = [ordered]@{
+                resolved = $false
+                reason = 'project_context_conflict'
+                attempts = if ($VisibleProject.Contains('attempts')) { [int]$VisibleProject.attempts } else { 1 }
+            }
+            stableContextFallbackUsed = $false
+            stableContextBindingPending = $false
+        }
+    }
     if ($VisibleProject.resolved) {
+        $visibleBindingConflicts = [bool](
+            [bool]$HostProjectContext.Isolated -and
+            $VisibleProjectBinding -and
+            [string]$VisibleProjectBinding.contextKey -ne $RequestedContextKey
+        )
+        $requestedBindingConflicts = [bool](
+            [bool]$HostProjectContext.Isolated -and
+            $RememberedContextBinding -and
+            [string]$RememberedContextBinding.projectKey -ne [string]$VisibleProject.key
+        )
+        if ($visibleBindingConflicts -or $requestedBindingConflicts) {
+            return [pscustomobject][ordered]@{
+                project = [ordered]@{
+                    resolved = $false
+                    reason = 'project_context_conflict'
+                    attempts = if ($VisibleProject.Contains('attempts')) { [int]$VisibleProject.attempts } else { 1 }
+                }
+                stableContextFallbackUsed = $false
+                stableContextBindingPending = $false
+            }
+        }
         return [pscustomobject][ordered]@{
             project = $VisibleProject
             stableContextFallbackUsed = $false
@@ -1883,6 +1915,18 @@ if ($Mode -eq 'WatchExit') {
             $activeProject = Get-ActiveChatProject $watchChat
             $rememberedProjectKey = if ($watchState.PSObject.Properties['chatProjectKey']) { [string]$watchState.chatProjectKey } else { '' }
             if (-not $activeProject.resolved) {
+                $stableContextAuthoritative = [bool](
+                    $watchState.PSObject.Properties['chatProjectStableContextFallback'] -and
+                    [bool]$watchState.chatProjectStableContextFallback -and
+                    $watchState.PSObject.Properties['contextKey'] -and
+                    [string]$watchState.contextKey -match '^ctx-[0-9a-f]{64}$'
+                )
+                if ($stableContextAuthoritative) {
+                    $pendingProjectKey = $null
+                    $pendingProjectCount = 0
+                    Start-Sleep -Milliseconds 250
+                    continue
+                }
                 if ($pendingProjectKey -eq 'unresolved') { $pendingProjectCount++ } else {
                     $pendingProjectKey = 'unresolved'
                     $pendingProjectCount = 1
@@ -2123,7 +2167,8 @@ $requestedContextKey = Get-CogentStackContextFromUrl $safeUrl
 $rememberedContextBinding = if ([bool]$hostProjectContext.Isolated -and [string]$hostProjectContext.ContextKey -eq $requestedContextKey) {
     Find-ContextBindingByContext $requestedContextKey
 } else { $null }
-$openProjectResolution = Resolve-ChatProjectForOpen $activeChatProject $hostProjectContext $requestedContextKey $rememberedContextBinding
+$visibleProjectBinding = if ($activeChatProject.resolved) { Find-ContextBinding ([string]$activeChatProject.key) } else { $null }
+$openProjectResolution = Resolve-ChatProjectForOpen $activeChatProject $hostProjectContext $requestedContextKey $rememberedContextBinding $visibleProjectBinding
 $activeChatProject = $openProjectResolution.project
 $stableContextFallbackUsed = [bool]$openProjectResolution.stableContextFallbackUsed
 $stableContextBindingPending = [bool]$openProjectResolution.stableContextBindingPending
@@ -2355,7 +2400,7 @@ $headerVisible = Wait-CogentStackHeaderVisible $panelWindow $area
 $layoutAccepted = [bool]($layout.verified -and $layering.verified -and $headerVisible -and $pageOnly.topCropRemoved)
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 $layoutState = [pscustomobject][ordered]@{
-    schemaVersion = 14
+    schemaVersion = 15
     chatDesktopHandle = [Int64]$chatDesktopWindow.Handle
     chatDesktopProcessId = [int]$chatDesktopWindow.ProcessId
     chatDesktopOriginal = $chatOriginal
