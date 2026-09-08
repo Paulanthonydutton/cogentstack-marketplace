@@ -3,8 +3,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallationRequest,
 
-    [ValidateRange(5, 30)]
-    [int]$DeadlineSeconds = 30,
+    [ValidateRange(30, 150)]
+    [int]$InstallerTimeoutSeconds = 120,
 
     [switch]$MarketplacePrepared,
 
@@ -14,6 +14,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$protocol = 'trusted-marketplace-v3'
 $marketplaceName = 'cogentstack'
 $marketplaceSource = 'https://github.com/Paulanthonydutton/cogentstack-marketplace.git'
 $workspaceUrl = 'https://cogentstack.app/stack?surface=chatgpt'
@@ -24,12 +25,36 @@ $InstallationRequest = ''
 $claimJob = $null
 $claimAttempted = $false
 $claimSucceeded = $false
+$installerTimedOut = $false
+$nativeCommandsStarted = 0
+$nativeCommandsCompleted = 0
+$lastNativeOperation = $null
+$completedStages = [Collections.Generic.List[object]]::new()
 $stage = 'initialization'
+$stageStartedMs = 0
+
+function Set-InstallStage {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    $script:stage = $Name
+    $script:stageStartedMs = [int]$script:timer.ElapsedMilliseconds
+}
+
+function Complete-InstallStage {
+    $script:completedStages.Add([ordered]@{
+        stage = $script:stage
+        durationMs = [Math]::Max(0, [int]$script:timer.ElapsedMilliseconds - $script:stageStartedMs)
+    })
+}
+
+function Throw-InstallerTimeout {
+    $script:installerTimedOut = $true
+    throw "The running installer exceeded its process-owned $InstallerTimeoutSeconds-second limit."
+}
 
 function Get-RemainingMilliseconds {
-    $remaining = ($DeadlineSeconds * 1000) - [int]$timer.ElapsedMilliseconds
+    $remaining = ($InstallerTimeoutSeconds * 1000) - [int]$timer.ElapsedMilliseconds
     if ($remaining -le 0) {
-        throw 'The bounded CogentStack installation exceeded 30 seconds before the account request was consumed.'
+        Throw-InstallerTimeout
     }
     return $remaining
 }
@@ -40,7 +65,10 @@ function Invoke-BoundedNative {
         [string]$FilePath,
 
         [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Operation
     )
 
     $remaining = Get-RemainingMilliseconds
@@ -62,21 +90,24 @@ function Invoke-BoundedNative {
 
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
+    $script:lastNativeOperation = $Operation
     try {
         if (-not $process.Start()) {
-            throw "Could not start $FilePath."
+            throw "Could not start the $Operation command."
         }
+        $script:nativeCommandsStarted++
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($remaining)) {
             try { $process.Kill($true) } catch { }
-            throw 'The bounded CogentStack installation exceeded 30 seconds.'
+            Throw-InstallerTimeout
         }
         $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
         $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
+        $script:nativeCommandsCompleted++
         if ($process.ExitCode -ne 0) {
             $detail = if ($stderr) { $stderr } elseif ($stdout) { $stdout } else { "exit code $($process.ExitCode)" }
-            throw "A required installation command failed: $detail"
+            throw "$Operation failed: $detail"
         }
         return $stdout
     } finally {
@@ -101,18 +132,9 @@ function Read-JsonResult {
 }
 
 function Get-MarketplaceState {
-    $json = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'marketplace', 'list', '--json')
+    $json = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'marketplace', 'list', '--json') -Operation 'marketplace inspection'
     $result = Read-JsonResult -Text $json -Operation 'Marketplace inspection'
     return @($result.marketplaces | Where-Object { $_.name -eq $marketplaceName }) | Select-Object -First 1
-}
-
-function Add-CogentStackMarketplace {
-    [void](Invoke-BoundedNative -FilePath $script:codexPath -Arguments @(
-        'plugin', 'marketplace', 'add', $marketplaceSource,
-        '--sparse', $requiredSparsePaths[0],
-        '--sparse', $requiredSparsePaths[1],
-        '--json'
-    ))
 }
 
 function Test-StringSetEqual {
@@ -123,16 +145,23 @@ function Test-StringSetEqual {
 
 try {
     if ($privateInstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,}$') {
-        throw 'The account-bound installation request is missing or invalid. Copy a fresh request from https://cogentstack.app/install.'
+        throw 'The current installation invocation is missing a valid account-bound request.'
+    }
+    if (-not $MarketplacePrepared) {
+        throw 'Protocol v3 requires a marketplace prepared by Codex before this installer process starts.'
     }
 
     $codexCommand = @(Get-Command codex.cmd -CommandType Application -ErrorAction Stop) | Select-Object -First 1
-    $gitCommand = @(Get-Command git.exe -CommandType Application -ErrorAction Stop) | Select-Object -First 1
+    $gitCommand = @(Get-Command git.cmd -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
+    if (-not $gitCommand) {
+        $gitCommand = @(Get-Command git.exe -CommandType Application -ErrorAction Stop) | Select-Object -First 1
+    }
     $script:codexPath = [string]$codexCommand.Source
     $gitPath = [string]$gitCommand.Source
+    Complete-InstallStage
 
-    $stage = 'workspace readiness'
-    $webTimeout = [Math]::Max(1, [Math]::Min(5, [Math]::Floor((Get-RemainingMilliseconds) / 1000)))
+    Set-InstallStage -Name 'workspace_readiness'
+    $webTimeout = [Math]::Max(1, [Math]::Min(10, [Math]::Floor((Get-RemainingMilliseconds) / 1000)))
     $response = Invoke-WebRequest `
         -Uri $workspaceUrl `
         -UseBasicParsing `
@@ -155,82 +184,51 @@ try {
     if ($response.Content -notmatch 'Creating a Project:' -or $response.Content -notmatch 'Find a project type') {
         throw 'The CogentStack workspace is missing a required project-creation marker.'
     }
+    Complete-InstallStage
 
-    if ($MarketplacePrepared) {
-        $stage = 'prepared marketplace verification'
-        $marketplace = Get-MarketplaceState
-        if (-not $marketplace -or -not (Test-Path -LiteralPath ([string]$marketplace.root))) {
-            throw 'The prepared CogentStack marketplace registration is unavailable.'
-        }
-        $marketplaceRoot = (Resolve-Path -LiteralPath ([string]$marketplace.root) -ErrorAction Stop).Path.TrimEnd('\', '/')
-        $installerMarketplaceRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..') -ErrorAction Stop).Path.TrimEnd('\', '/')
-        if (-not [string]::Equals($marketplaceRoot, $installerMarketplaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'The bounded installer is not running from the prepared CogentStack marketplace.'
-        }
-        $preparedRemote = Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'remote', 'get-url', 'origin')
-        $preparedSparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'sparse-checkout', 'list')) -split "`r?`n" | Where-Object { $_ })
-        if ($preparedRemote.Trim() -ne $marketplaceSource -or -not (Test-StringSetEqual -Actual $preparedSparse -Expected $requiredSparsePaths)) {
-            throw 'The prepared CogentStack marketplace does not match the official Git source and sparse paths.'
-        }
-    } else {
-        $stage = 'marketplace registration inspection'
-        $marketplace = Get-MarketplaceState
-        $registrationMatches = $false
-        if ($marketplace -and (Test-Path -LiteralPath ([string]$marketplace.root))) {
-            $root = [string]$marketplace.root
-            $remote = Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $root, 'remote', 'get-url', 'origin')
-            $sparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $root, 'sparse-checkout', 'list')) -split "`r?`n" | Where-Object { $_ })
-            $registrationMatches = $remote.Trim() -eq $marketplaceSource -and (Test-StringSetEqual -Actual $sparse -Expected $requiredSparsePaths)
-        }
-
-        $stage = 'marketplace registration repair'
-        if ($marketplace -and -not $registrationMatches) {
-            [void](Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'marketplace', 'remove', $marketplaceName, '--json'))
-            Add-CogentStackMarketplace
-        } elseif (-not $marketplace) {
-            Add-CogentStackMarketplace
-        }
-
-        $stage = 'marketplace refresh'
-        [void](Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'marketplace', 'upgrade', $marketplaceName))
-
-        $stage = 'refreshed marketplace verification'
-        $marketplace = Get-MarketplaceState
-        if (-not $marketplace -or -not (Test-Path -LiteralPath ([string]$marketplace.root))) {
-            throw 'The refreshed CogentStack marketplace registration is unavailable.'
-        }
-        $marketplaceRoot = [string]$marketplace.root
-        $refreshedRemote = Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'remote', 'get-url', 'origin')
-        $refreshedSparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'sparse-checkout', 'list')) -split "`r?`n" | Where-Object { $_ })
-        if ($refreshedRemote.Trim() -ne $marketplaceSource -or -not (Test-StringSetEqual -Actual $refreshedSparse -Expected $requiredSparsePaths)) {
-            throw 'The refreshed CogentStack marketplace does not match the official Git source and sparse paths.'
-        }
+    Set-InstallStage -Name 'prepared_marketplace_verification'
+    $marketplace = Get-MarketplaceState
+    if (-not $marketplace -or -not (Test-Path -LiteralPath ([string]$marketplace.root))) {
+        throw 'The prepared CogentStack marketplace registration is unavailable.'
     }
+    $marketplaceRoot = (Resolve-Path -LiteralPath ([string]$marketplace.root) -ErrorAction Stop).Path.TrimEnd('\', '/')
+    $installerMarketplaceRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..') -ErrorAction Stop).Path.TrimEnd('\', '/')
+    if (-not [string]::Equals($marketplaceRoot, $installerMarketplaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The installer is not running from the prepared CogentStack marketplace.'
+    }
+    $preparedRemote = Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'remote', 'get-url', 'origin') -Operation 'marketplace remote verification'
+    $preparedSparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'sparse-checkout', 'list') -Operation 'marketplace sparse-path verification') -split "`r?`n" | Where-Object { $_ })
+    if ($preparedRemote.Trim() -ne $marketplaceSource -or -not (Test-StringSetEqual -Actual $preparedSparse -Expected $requiredSparsePaths)) {
+        throw 'The prepared CogentStack marketplace does not match the official Git source and sparse paths.'
+    }
+    Complete-InstallStage
 
-    $stage = 'plugin installation'
-    $installJson = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'add', 'cogentstack@cogentstack', '--json')
+    Set-InstallStage -Name 'plugin_installation'
+    $installJson = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'add', 'cogentstack@cogentstack', '--json') -Operation 'plugin installation'
     $installResult = Read-JsonResult -Text $installJson -Operation 'Plugin installation'
     $installedPath = [string]$installResult.installedPath
     if (-not $installedPath -or -not (Test-Path -LiteralPath $installedPath)) {
         throw 'The CogentStack plugin installation did not return a valid installed package path.'
     }
+    Complete-InstallStage
 
-    $stage = 'installed and enabled verification'
-    $pluginListJson = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'list', '--json')
+    Set-InstallStage -Name 'installed_state_verification'
+    $pluginListJson = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'list', '--json') -Operation 'installed plugin inspection'
     $pluginList = Read-JsonResult -Text $pluginListJson -Operation 'Installed plugin inspection'
     $installedPlugin = @($pluginList.installed | Where-Object { $_.pluginId -eq 'cogentstack@cogentstack' }) | Select-Object -First 1
     if (-not $installedPlugin -or -not [bool]$installedPlugin.installed -or -not [bool]$installedPlugin.enabled) {
         throw 'The CogentStack plugin is not installed and enabled.'
     }
+    Complete-InstallStage
 
-    $stage = 'package integrity verification'
+    Set-InstallStage -Name 'package_integrity_verification'
     $sourcePluginPath = Join-Path $marketplaceRoot 'plugins\cogentstack'
     $sourceManifestPath = Join-Path $sourcePluginPath '.codex-plugin\plugin.json'
     $installedManifestPath = Join-Path $installedPath '.codex-plugin\plugin.json'
     $sourceManifest = Get-Content -LiteralPath $sourceManifestPath -Raw | ConvertFrom-Json
     $installedManifest = Get-Content -LiteralPath $installedManifestPath -Raw | ConvertFrom-Json
     if ([string]$sourceManifest.version -ne [string]$installedManifest.version -or [string]$installedPlugin.version -ne [string]$sourceManifest.version) {
-        throw 'The installed CogentStack version does not match the refreshed marketplace package.'
+        throw 'The installed CogentStack version does not match the prepared marketplace package.'
     }
 
     $allowedFiles = @(
@@ -262,10 +260,12 @@ try {
         $sourceHash = (Get-FileHash -LiteralPath (Join-Path $sourcePluginPath $nativeRelativePath) -Algorithm SHA256).Hash
         $installedHash = (Get-FileHash -LiteralPath (Join-Path $installedPath $nativeRelativePath) -Algorithm SHA256).Hash
         if ($sourceHash -ne $installedHash) {
-            throw "The installed package differs from the refreshed marketplace at $relativePath."
+            throw "The installed package differs from the prepared marketplace at $relativePath."
         }
     }
+    Complete-InstallStage
 
+    Set-InstallStage -Name 'launcher_contract_verification'
     $skillText = Get-Content -LiteralPath (Join-Path $installedPath 'skills\cogentstack\SKILL.md') -Raw
     $requiredSkillStatements = @(
         'Run `scripts/ensure-cogentstack.ps1 -Mode Companion` exactly once.',
@@ -298,23 +298,35 @@ try {
             throw 'The companion helper is missing a required reversible-layout marker.'
         }
     }
+    Complete-InstallStage
 
     if ($ValidateOnly) {
         [ordered]@{
+            protocol = $protocol
             status = 'validated'
+            failureStage = $null
+            installerStarted = $true
+            installerTimedOut = $false
+            marketplacePrepared = $true
+            nativeCommandsStarted = $nativeCommandsStarted
+            nativeCommandsCompleted = $nativeCommandsCompleted
+            lastNativeOperation = $lastNativeOperation
+            completedStages = @($completedStages)
+            claimAttempted = $false
+            accountRequestConsumed = $false
+            connected = $false
             installed = $true
             enabled = $true
             version = [string]$installedManifest.version
-            accountRequestConsumed = $false
-            durationMs = [int]$timer.ElapsedMilliseconds
-        } | ConvertTo-Json -Compress | Write-Output
+            installerElapsedMs = [int]$timer.ElapsedMilliseconds
+        } | ConvertTo-Json -Compress -Depth 5 | Write-Output
         exit 0
     }
 
-    $stage = 'account-bound installation claim'
+    Set-InstallStage -Name 'account_bound_claim'
     $remainingForClaim = Get-RemainingMilliseconds
-    if ($remainingForClaim -lt 2000) {
-        throw 'The bounded installation did not leave enough time to safely consume the account request.'
+    if ($remainingForClaim -lt 5000) {
+        throw 'The running installer did not leave at least five seconds to begin the account-bound claim safely.'
     }
     $connectScript = Join-Path $installedPath 'skills\cogentstack\scripts\connect-cogentstack.ps1'
     $claimJob = Start-Job -ScriptBlock {
@@ -327,7 +339,7 @@ try {
     $claimWaitSeconds = [Math]::Max(1, [Math]::Floor((Get-RemainingMilliseconds) / 1000))
     if (-not (Wait-Job -Job $claimJob -Timeout $claimWaitSeconds)) {
         Stop-Job -Job $claimJob -ErrorAction SilentlyContinue
-        throw 'The bounded CogentStack installation exceeded 30 seconds while establishing the account-bound connection.'
+        Throw-InstallerTimeout
     }
     $claimOutput = (@(Receive-Job -Job $claimJob -ErrorAction Stop) | ForEach-Object { [string]$_ }) -join "`n"
     $claimResult = Read-JsonResult -Text $claimOutput.Trim() -Operation 'Account-bound installation claim'
@@ -335,22 +347,45 @@ try {
         throw 'The account-bound installation claim did not return the three required connection guarantees.'
     }
     $claimSucceeded = $true
+    Complete-InstallStage
 
     [ordered]@{
+        protocol = $protocol
         status = 'installed'
+        failureStage = $null
+        installerStarted = $true
+        installerTimedOut = $false
+        marketplacePrepared = $true
+        nativeCommandsStarted = $nativeCommandsStarted
+        nativeCommandsCompleted = $nativeCommandsCompleted
+        lastNativeOperation = $lastNativeOperation
+        completedStages = @($completedStages)
+        claimAttempted = $true
+        accountRequestConsumed = $true
         connected = $true
         accountBound = $true
         installationBound = $true
         version = [string]$installedManifest.version
-        durationMs = [int]$timer.ElapsedMilliseconds
-    } | ConvertTo-Json -Compress | Write-Output
+        installerElapsedMs = [int]$timer.ElapsedMilliseconds
+    } | ConvertTo-Json -Compress -Depth 5 | Write-Output
 } catch {
     [ordered]@{
+        protocol = $protocol
         status = 'failed'
-        reason = "$stage`: $([string]$_.Exception.Message)"
+        failureStage = $stage
+        installerStarted = $true
+        installerTimedOut = $installerTimedOut
+        marketplacePrepared = [bool]$MarketplacePrepared
+        nativeCommandsStarted = $nativeCommandsStarted
+        nativeCommandsCompleted = $nativeCommandsCompleted
+        lastNativeOperation = $lastNativeOperation
+        completedStages = @($completedStages)
+        failedStageElapsedMs = [Math]::Max(0, [int]$timer.ElapsedMilliseconds - $stageStartedMs)
+        claimAttempted = $claimAttempted
         accountRequestConsumed = if ($claimSucceeded) { $true } elseif ($claimAttempted) { $null } else { $false }
-        durationMs = [int]$timer.ElapsedMilliseconds
-    } | ConvertTo-Json -Compress | Write-Output
+        exactReason = [string]$_.Exception.Message
+        installerElapsedMs = [int]$timer.ElapsedMilliseconds
+    } | ConvertTo-Json -Compress -Depth 5 | Write-Output
     exit 1
 } finally {
     $InstallationRequest = ''

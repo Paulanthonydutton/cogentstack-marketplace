@@ -6,6 +6,7 @@ const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const manifestPath = join(repositoryRoot, "desktop", "marketplace.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const installInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.md"), "utf8");
+const versionedInstallInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.v3.md"), "utf8");
 const boundedInstaller = await readFile(join(repositoryRoot, ".agents", "plugins", "install-cogentstack.ps1"), "utf8");
 const sourcePluginPath = join(repositoryRoot, "plugins", "cogentstack");
 const semver = /^[0-9]+\.[0-9]+\.[0-9]+$/;
@@ -49,22 +50,49 @@ if (windows.automaticLaunch !== false) fail("first installation must not claim t
 if (installInstructions.includes("https://raw.githubusercontent.com")) {
   fail("the official Codex bootstrap must not require a shell-level raw installer download");
 }
+if (installInstructions !== versionedInstallInstructions) {
+  fail("INSTALL.md and the versioned INSTALL.v3.md protocol must be identical");
+}
 for (const requiredInstruction of [
+  "trusted-marketplace-v3",
+  "current user message",
+  "Never recover or reuse a reference from an earlier message",
+  "Do not start, estimate, announce, or expire an agent-side installation deadline",
   "codex plugin marketplace list --json",
   "codex plugin marketplace add",
   "codex plugin marketplace upgrade cogentstack",
   "-MarketplacePrepared",
+  "-InstallerTimeoutSeconds 120",
+  "status: not_started",
+  "installerStarted: false",
+  "claimAttempted: false",
+  "accountRequestConsumed: false",
   "project-context.ps1",
   "project-knowledge.ps1",
 ]) {
   if (!installInstructions.includes(requiredInstruction)) fail(`INSTALL.md is missing ${requiredInstruction}`);
 }
 for (const requiredInstallerMarker of [
+  "$protocol = 'trusted-marketplace-v3'",
+  "[int]$InstallerTimeoutSeconds = 120",
   "[switch]$MarketplacePrepared",
-  "prepared marketplace verification",
-  "The bounded installer is not running from the prepared CogentStack marketplace.",
+  "prepared_marketplace_verification",
+  "installerStarted = $true",
+  "installerTimedOut = $installerTimedOut",
+  "failureStage = $stage",
+  "nativeCommandsStarted = $nativeCommandsStarted",
+  "nativeCommandsCompleted = $nativeCommandsCompleted",
+  "completedStages = @($completedStages)",
+  "claimAttempted = $claimAttempted",
+  "accountRequestConsumed = if ($claimSucceeded)",
+  "exactReason = [string]$_.Exception.Message",
+  "installerElapsedMs = [int]$timer.ElapsedMilliseconds",
+  "The installer is not running from the prepared CogentStack marketplace.",
 ]) {
   if (!boundedInstaller.includes(requiredInstallerMarker)) fail(`the bounded installer is missing ${requiredInstallerMarker}`);
+}
+for (const prohibitedMarker of ["$DeadlineSeconds", "exceeded 30 seconds", "marketplace registration repair"]) {
+  if (boundedInstaller.includes(prohibitedMarker)) fail(`the v3 bounded installer still contains obsolete orchestration: ${prohibitedMarker}`);
 }
 if (boundedInstaller.includes("marketplace.marketplaceSource.source")) {
   fail("the bounded installer must verify the registered checkout instead of relying on removed marketplace source metadata");
@@ -92,6 +120,6 @@ console.log(JSON.stringify({
   size: windows.installerSizeBytes,
   automaticUpdates: Boolean(windows.updaterSignature),
   automaticLaunch: windows.automaticLaunch,
-  installerBootstrap: "trusted-marketplace",
+  installerBootstrap: "trusted-marketplace-v3",
   pluginFiles: actualPluginFiles.length,
 }));
