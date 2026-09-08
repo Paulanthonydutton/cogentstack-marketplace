@@ -387,6 +387,7 @@ function Resolve-ChatProjectForOpen($VisibleProject, $HostProjectContext, [strin
         $visibleBindingConflicts = [bool](
             [bool]$HostProjectContext.Isolated -and
             $VisibleProjectBinding -and
+            [string]$VisibleProjectBinding.contextKey -ne 'default' -and
             [string]$VisibleProjectBinding.contextKey -ne $RequestedContextKey
         )
         $requestedBindingConflicts = [bool](
