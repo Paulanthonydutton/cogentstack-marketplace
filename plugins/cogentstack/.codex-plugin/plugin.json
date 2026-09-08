@@ -1,6 +1,6 @@
 {
   "name": "cogentstack",
-  "version": "0.4.0+codex.20260908144123",
+  "version": "0.4.0+codex.20260908152313",
   "description": "Reuse one signed-in CogentStack browser workspace across isolated ChatGPT Project contexts, restore portable Git-backed project knowledge, and execute approved project actions.",
   "homepage": "https://cogentstack.app/install",
   "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",

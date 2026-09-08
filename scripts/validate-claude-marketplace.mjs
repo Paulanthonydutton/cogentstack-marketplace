@@ -284,7 +284,7 @@ for (const marker of [
   "chatgpt_project_unresolved",
   "chatgpt-companion-contexts.json",
   "Find-ContextBinding",
-  "Suspend-CompanionLayout $watchState $false 'inactive-project' $true",
+  "Suspend-CompanionLayout $watchState $true 'inactive-project' $true",
   "$pendingProjectCount -lt 4",
   "chatProjectVisualBindingPending",
   "accessibility-late-binding",
@@ -299,23 +299,23 @@ if (codexCompanionSource.includes("TopMost = `$true")) fail("Codex divider must 
 if (codexCompanionSource.includes("Resolve-WatcherChatProject")) fail("Codex watcher must not substitute a remembered Project when the visible Project is unresolved");
 const codexWatchAddressIndex = codexCompanionSource.indexOf("$watchAddress = Get-BrowserAddressValue $watchPanel");
 const codexCloseIndex = codexCompanionSource.indexOf("if (Test-CompanionExitAddress $watchAddress)", codexWatchAddressIndex);
-const codexProjectIndex = codexCompanionSource.indexOf("$activeProject = Get-ActiveChatProject $watchChat", codexCloseIndex);
-const codexCreationIndex = codexCompanionSource.indexOf("$creationRequestId = Get-CompanionProjectCreationRequestId", codexProjectIndex);
-const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexCreationIndex);
+const codexCreationIndex = codexCompanionSource.indexOf("$creationRequestId = Get-CompanionProjectCreationRequestId", codexCloseIndex);
+const codexProjectIndex = codexCompanionSource.indexOf("$activeProject = Get-ActiveChatProject $watchChat", codexCreationIndex);
+const codexDeletionIndex = codexCompanionSource.indexOf("if (Test-CompanionProjectDeletionAddress $watchAddress)", codexProjectIndex);
 if (
   codexWatchAddressIndex < 0 ||
   codexCloseIndex <= codexWatchAddressIndex ||
-  codexProjectIndex <= codexCloseIndex ||
-  codexCreationIndex <= codexProjectIndex ||
-  codexDeletionIndex <= codexCreationIndex
+  codexCreationIndex <= codexCloseIndex ||
+  codexProjectIndex <= codexCreationIndex ||
+  codexDeletionIndex <= codexProjectIndex
 ) {
-  fail("Codex companion must restore on close before optional Project resolution, then process creation and deletion only after Project isolation");
+  fail("Codex companion must restore on close, capture a context-matched approved creation before transient Project resolution, and keep deletion behind Project isolation");
 }
 const projectMismatchStart = codexCompanionSource.indexOf("if ($observedProjectKey -ne $rememberedProjectKey)");
 const projectMismatchEnd = codexCompanionSource.indexOf("$pendingProjectKey = $null", projectMismatchStart);
 const projectMismatchBranch = codexCompanionSource.slice(projectMismatchStart, projectMismatchEnd);
 if (projectMismatchStart < 0 || projectMismatchEnd <= projectMismatchStart) fail("Codex companion is missing its Project-mismatch isolation branch");
-if (!projectMismatchBranch.includes("Suspend-CompanionLayout $watchState $false 'inactive-project' $true")) fail("Codex companion must suspend when another ChatGPT Project becomes visible");
+if (!projectMismatchBranch.includes("Suspend-CompanionLayout $watchState $true 'inactive-project' $true")) fail("Codex companion must restore and maximize the ordinary browser when another ChatGPT Project becomes visible");
 for (const forbidden of ["Find-ContextBinding", "context-switch", "-Name chatProjectKey", "-Name contextKey", "-Name workspaceUrl"]) {
   if (projectMismatchBranch.includes(forbidden)) fail(`Codex companion must not switch its running session to another Project: ${forbidden}`);
 }

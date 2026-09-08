@@ -1965,7 +1965,7 @@ if ($Mode -eq 'Toggle') {
 }
 
 if ($Mode -eq 'CreateProjectWorker') {
-    $creationMutex = New-Object System.Threading.Mutex($false, 'Local\CogentStackCompanionProjectCreation')
+    $creationMutex = New-Object System.Threading.Mutex($false, "Local\CogentStackCompanionProjectCreation-$($RequestId.ToLowerInvariant())")
     $ownsCreationMutex = $false
     try {
         $ownsCreationMutex = $creationMutex.WaitOne(0)
@@ -2006,6 +2006,28 @@ if ($Mode -eq 'WatchExit') {
                 Restore-CompanionLayout $watchState $false $true $true | Out-Null
                 break
             }
+            $watchContextKey = if ($watchState.PSObject.Properties['contextKey']) { [string]$watchState.contextKey } else { 'default' }
+            $creationRequestId = Get-CompanionProjectCreationRequestId $watchAddress
+            $creationAddressContextKey = if ($creationRequestId) {
+                try { Get-CogentStackContextFromUrl $watchAddress } catch { '' }
+            } else { '' }
+            if (
+                $creationRequestId -and
+                $creationAddressContextKey -eq $watchContextKey -and
+                $handledCreationRequests.Add($creationRequestId)
+            ) {
+                # The exact request and logical context were already approved in the hosted
+                # workspace. Start the independent worker before transient ChatGPT Project
+                # visibility checks can suspend the companion and strand that approval.
+                $creationStarted = Start-ApprovedProjectCreationWorker $creationRequestId $watchContextKey
+                if (-not $creationStarted) {
+                    $returnUrl = [string]$watchState.workspaceUrl
+                    $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_creation=failed&desktop_request=$creationRequestId"
+                    Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
+                }
+                Start-Sleep -Milliseconds 500
+                continue
+            }
             $layoutStatus = if ($watchState.PSObject.Properties['layoutStatus']) { [string]$watchState.layoutStatus } else { 'active' }
             $watchChat = Find-RememberedWindow $watchState 'chatDesktop'
             $activeProject = Get-ActiveChatProject $watchChat
@@ -2020,7 +2042,7 @@ if ($Mode -eq 'WatchExit') {
                     continue
                 }
                 if ($layoutStatus -eq 'active') {
-                    Suspend-CompanionLayout $watchState $false 'inactive-project' $true | Out-Null
+                    Suspend-CompanionLayout $watchState $true 'inactive-project' $true | Out-Null
                 }
                 Start-Sleep -Milliseconds 250
                 continue
@@ -2050,7 +2072,7 @@ if ($Mode -eq 'WatchExit') {
             $observedProjectKey = [string]$activeProject.key
             if ($observedProjectKey -ne $rememberedProjectKey) {
                 if ($layoutStatus -eq 'active') {
-                    Suspend-CompanionLayout $watchState $false 'inactive-project' $true | Out-Null
+                    Suspend-CompanionLayout $watchState $true 'inactive-project' $true | Out-Null
                 }
                 Start-Sleep -Milliseconds 250
                 continue
@@ -2064,20 +2086,7 @@ if ($Mode -eq 'WatchExit') {
                 continue
             }
             $watchAddress = Get-BrowserAddressValue $watchPanel
-            $creationRequestId = Get-CompanionProjectCreationRequestId $watchAddress
-            if ($creationRequestId -and $handledCreationRequests.Add($creationRequestId)) {
-                $watchContextKey = if ($watchState.PSObject.Properties['contextKey']) { [string]$watchState.contextKey } else { 'default' }
-                $creationStarted = Start-ApprovedProjectCreationWorker $creationRequestId $watchContextKey
-                if (-not $creationStarted) {
-                    $returnUrl = [string]$watchState.workspaceUrl
-                    $returnUrl = "$returnUrl$(if ($returnUrl.Contains('?')) { '&' } else { '?' })desktop_creation=failed&desktop_request=$creationRequestId"
-                    Set-BrowserWorkspaceAddress $watchPanel $returnUrl | Out-Null
-                }
-                Start-Sleep -Milliseconds 500
-                continue
-            }
             if (Test-CompanionProjectDeletionAddress $watchAddress) {
-                $watchContextKey = if ($watchState.PSObject.Properties['contextKey']) { [string]$watchState.contextKey } else { 'default' }
                 $deleted = Invoke-ApprovedProjectDeletion $watchContextKey
                 $returnUrl = [string]$watchState.workspaceUrl
                 if (-not $deleted) {
