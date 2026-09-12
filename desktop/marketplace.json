@@ -1,23 +1,23 @@
 {
   "$schema": "./marketplace.schema.json",
   "schemaVersion": 1,
-  "application": "CogentStack Desktop",
-  "latestVersion": "0.1.16",
+  "application": "CogentSpec Desktop",
+  "latestVersion": "0.1.17",
   "minimumSupportedVersion": "0.1.1",
-  "releaseTag": "desktop-v0.1.16",
-  "releasePageUrl": "https://github.com/cogentspec/cogentspec-marketplace/releases/tag/desktop-v0.1.16",
+  "releaseTag": "desktop-v0.1.17",
+  "releasePageUrl": "https://github.com/cogentspec/cogentspec-marketplace/releases/tag/desktop-v0.1.17",
   "releaseNotes": [
-    "Removes the duplicated right-pane title band so the CogentStack workspace begins directly below the main Desktop toolbar.",
-    "Gives the embedded contract workspace the full remaining right-pane height while preserving the adjustable split view.",
-    "Keeps Cloud, Local and Hybrid controls, model selection, and the compact composer unchanged."
+    "Renames the installed application and executable to CogentSpec Desktop.",
+    "Uses cogentspec:// as the primary verified desktop launch link.",
+    "Retains the legacy cogentstack:// link and existing application identity only as an in-place upgrade bridge."
   ],
   "windows": {
     "architecture": "x64",
-    "installerUrl": "https://github.com/cogentspec/cogentspec-marketplace/releases/download/desktop-v0.1.16/CogentStack-Desktop-0.1.16-x64-setup.exe",
-    "installerSha256": "a61961e5995850049f8615a4dcecc614bb25ed26f35d1588691a3debe068e59c",
-    "installerSizeBytes": 57865017,
+    "installerUrl": "https://github.com/cogentspec/cogentspec-marketplace/releases/download/desktop-v0.1.17/CogentSpec-Desktop-0.1.17-x64-setup.exe",
+    "installerSha256": "7b5db19d943fbf2d1d5c6c88a71e4e7055971db3395c740a0a502f0809f6b21c",
+    "installerSizeBytes": 58003700,
     "authenticodeSigned": false,
-    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSmF2UXYwcDlFMVBocHQraXh4WTdpSzNUcVR6SHdjMmx4S1d2em04T2pRVXgvQUFycU1tdUw0YmtSWjN5OHVVaFNackU3Q2FpMW1MdHExK3o5dG1FNndzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NjI3NzcxCWZpbGU6Q29nZW50U3RhY2sgRGVza3RvcF8wLjEuMTZfeDY0LXNldHVwLmV4ZQowc2gzb0NxUjkzaWlqOGh1RlZuSEJ1RHdMU0hZcXZWQzdxZnVnNldSYmtFSXgwMzVZMFVDOGNBQXVGTHVhcktkN0lmSnM5SWJub29WaGlnSkY3STVCUT09Cg==",
+    "updaterSignature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTSGloc0Fhb1VGSmZpbldFUllTbXlUZUJQV1FtSm5ydTN3Ykk2SlFtSSt2YU9sM2lndGI2TVpYUEdvVEMwdm1TbHJYQnU5a3pwaGZxSSs0TzBITkxUcGVFWGFFbmdjWUFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MjUwNjI0CWZpbGU6Q29nZW50U3BlYyBEZXNrdG9wXzAuMS4xN194NjQtc2V0dXAuZXhlCm84SWpLdlJCR0MvRmxTd1FsNUNoR1gvZU5yR2RGY0RlNzFpUVc3cUZkeEJ6b3RVVXBhekVaYjhEVkZwdEU5NisxVDZxbUFVNDhUazg1UHpIcElrZUN3PT0K",
     "requiresUserApproval": true,
     "automaticLaunch": false
   }
