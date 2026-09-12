@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const marketplacePath = join(repositoryRoot, ".claude-plugin", "marketplace.json");
 const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-const pluginEntry = marketplace.plugins?.find((candidate) => candidate.name === "cogentstack");
+const pluginEntry = marketplace.plugins?.find((candidate) => candidate.name === "cogentspec");
+const compatibilityEntry = marketplace.plugins?.find((candidate) => candidate.name === "cogentstack");
 
 const fail = (message) => {
   throw new Error(`Claude marketplace validation failed: ${message}`);
@@ -14,23 +15,25 @@ const fail = (message) => {
 const normalized = (value) => value.replaceAll("\r\n", "\n").trimEnd();
 
 if (marketplace.name !== "cogentstack") fail("marketplace name must be cogentstack");
-if (!pluginEntry) fail("cogentstack plugin entry is missing");
-if (pluginEntry.source !== "./claude-plugins/cogentstack") fail("plugin source must remain inside the Claude package directory");
+if (!pluginEntry) fail("canonical cogentspec plugin entry is missing");
+if (!compatibilityEntry) fail("cogentstack compatibility plugin entry is missing");
+if (pluginEntry.source !== "./claude-plugins/cogentspec") fail("canonical plugin source must remain inside the Claude package directory");
+if (compatibilityEntry.source !== "./claude-plugins/cogentstack") fail("compatibility plugin source must remain inside the Claude package directory");
 if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(pluginEntry.version ?? "")) fail("plugin version must use semantic versioning");
 
 const pluginRoot = resolve(repositoryRoot, pluginEntry.source);
 if (relative(repositoryRoot, pluginRoot).startsWith("..")) fail("plugin source escapes the repository");
 
 const manifest = JSON.parse(await readFile(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
-const skill = await readFile(join(pluginRoot, "skills", "cogentstack", "SKILL.md"), "utf8");
-const scriptsRoot = join(pluginRoot, "skills", "cogentstack", "scripts");
-const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills", "cogentstack", "scripts");
+const skill = await readFile(join(pluginRoot, "skills", "cogentspec", "SKILL.md"), "utf8");
+const scriptsRoot = join(pluginRoot, "skills", "cogentspec", "scripts");
+const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts");
 
-if (manifest.name !== "cogentstack") fail("plugin manifest name must be cogentstack");
+if (manifest.name !== "cogentspec") fail("canonical plugin manifest name must be cogentspec");
 if (manifest.version !== pluginEntry.version) fail("marketplace and plugin versions differ");
-if (!normalized(skill).startsWith("---\nname: cogentstack\n")) fail("skill frontmatter is invalid");
+if (!normalized(skill).startsWith("---\nname: cogentspec\n")) fail("skill frontmatter is invalid");
 for (const marker of [
-  "$cogentstack",
+  "$cogentspec",
   "${CLAUDE_PLUGIN_ROOT}",
   "CogentSpec is a normal web application",
   "start-cogentstack-bridge.ps1",

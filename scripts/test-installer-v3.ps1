@@ -33,11 +33,11 @@ function Invoke-InstallerFixture {
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("cogentstack-installer-v3-" + [Guid]::NewGuid().ToString('N'))
+$fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("cogentspec-installer-v3-" + [Guid]::NewGuid().ToString('N'))
 $fixtureMarketplace = Join-Path $fixtureRoot 'marketplace'
 $fixtureInstallerDirectory = Join-Path $fixtureMarketplace '.agents\plugins'
-$fixturePlugin = Join-Path $fixtureMarketplace 'plugins\cogentstack'
-$fixtureInstalledPlugin = Join-Path $fixtureRoot 'installed\cogentstack'
+$fixturePlugin = Join-Path $fixtureMarketplace 'plugins\cogentspec'
+$fixtureInstalledPlugin = Join-Path $fixtureRoot 'installed\cogentspec'
 $fixtureBin = Join-Path $fixtureRoot 'bin'
 $originalPath = $env:Path
 
@@ -45,8 +45,8 @@ try {
     [void](New-Item -ItemType Directory -Path $fixtureInstallerDirectory -Force)
     [void](New-Item -ItemType Directory -Path (Split-Path -Parent $fixturePlugin) -Force)
     [void](New-Item -ItemType Directory -Path $fixtureBin -Force)
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot '.agents\plugins\install-cogentstack.ps1') -Destination $fixtureInstallerDirectory
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentstack') -Destination $fixturePlugin -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot '.agents\plugins\install-cogentspec.ps1') -Destination $fixtureInstallerDirectory
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec') -Destination $fixturePlugin -Recurse -Force
 
     $pluginManifest = Get-Content -LiteralPath (Join-Path $fixturePlugin '.codex-plugin\plugin.json') -Raw | ConvertFrom-Json
     $escapedMarketplace = $fixtureMarketplace.Replace("'", "''")
@@ -58,7 +58,7 @@ try {
 param([Parameter(ValueFromRemainingArguments = `$true)][string[]]`$CliArgs)
 `$ErrorActionPreference = 'Stop'
 if (`$CliArgs.Count -ge 4 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq 'marketplace' -and `$CliArgs[2] -eq 'list') {
-    if (`$env:COGENTSTACK_INSTALLER_TEST_STALL -eq '1') { Start-Sleep -Seconds 35 }
+    if (`$env:COGENTSPEC_INSTALLER_TEST_STALL -eq '1') { Start-Sleep -Seconds 35 }
     [ordered]@{ marketplaces = @([ordered]@{ name = 'cogentstack'; root = '$escapedMarketplace' }) } | ConvertTo-Json -Compress
     exit 0
 }
@@ -70,7 +70,7 @@ if (`$CliArgs.Count -ge 3 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq '
     exit 0
 }
 if (`$CliArgs.Count -ge 3 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq 'list') {
-    [ordered]@{ installed = @([ordered]@{ pluginId = 'cogentstack@cogentstack'; installed = `$true; enabled = `$true; version = '$escapedVersion' }) } | ConvertTo-Json -Compress
+    [ordered]@{ installed = @([ordered]@{ pluginId = 'cogentspec@cogentstack'; installed = `$true; enabled = `$true; version = '$escapedVersion' }) } | ConvertTo-Json -Compress
     exit 0
 }
 Write-Error ('Unexpected Codex fixture arguments: ' + (`$CliArgs -join ' '))
@@ -87,6 +87,7 @@ if "%~3"=="remote" (
 )
 if "%~3"=="sparse-checkout" (
   echo .agents/plugins
+  echo plugins/cogentspec
   echo plugins/cogentstack
   exit /b 0
 )
@@ -97,7 +98,7 @@ exit /b 2
     $env:Path = "$fixtureBin$([IO.Path]::PathSeparator)$originalPath"
 
     $powerShellPath = (Get-Process -Id $PID).Path
-    $installerPath = Join-Path $fixtureInstallerDirectory 'install-cogentstack.ps1'
+    $installerPath = Join-Path $fixtureInstallerDirectory 'install-cogentspec.ps1'
     $validReference = 'cgb_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
     $validRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference
     $valid = $validRun.result
@@ -129,11 +130,11 @@ exit /b 2
     $timeoutCasePassed = $null
     $timeoutElapsedMs = $null
     if ($ExerciseTimeout) {
-        $env:COGENTSTACK_INSTALLER_TEST_STALL = '1'
+        $env:COGENTSPEC_INSTALLER_TEST_STALL = '1'
         try {
             $timeoutRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -TimeoutSeconds 30
         } finally {
-            Remove-Item Env:\COGENTSTACK_INSTALLER_TEST_STALL -ErrorAction SilentlyContinue
+            Remove-Item Env:\COGENTSPEC_INSTALLER_TEST_STALL -ErrorAction SilentlyContinue
         }
         $timeout = $timeoutRun.result
         Assert-InstallerTest ($timeoutRun.exitCode -ne 0) 'The forced-timeout installer run unexpectedly succeeded.'

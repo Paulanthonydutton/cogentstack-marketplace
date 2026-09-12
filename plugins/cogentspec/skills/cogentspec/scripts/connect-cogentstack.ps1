@@ -1,0 +1,268 @@
+param(
+    [ValidateSet('claim', 'start', 'complete', 'status', 'disconnect')]
+    [string]$Mode = 'start',
+
+    [string]$InstallationRequest = '',
+
+    [ValidateSet('chatgpt', 'claude-desktop')]
+    [string]$Surface = 'chatgpt'
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
+    try {
+        Add-Type -AssemblyName System.Security.Cryptography.ProtectedData -ErrorAction Stop
+    } catch {
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+    }
+}
+
+$serviceUrl = 'https://cogentspec.com'
+$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
+$pendingPath = Join-Path $stateRoot 'desktop-authorization.json'
+$credentialPath = Join-Path $stateRoot 'desktop-credential.json'
+
+function Protect-CogentSpecValue([string]$Value) {
+    $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
+    $protected = [System.Security.Cryptography.ProtectedData]::Protect(
+        $bytes,
+        $null,
+        [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    return [Convert]::ToBase64String($protected)
+}
+
+function Unprotect-CogentSpecValue([string]$Value) {
+    $protected = [Convert]::FromBase64String($Value)
+    $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+        $protected,
+        $null,
+        [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    return [Text.Encoding]::UTF8.GetString($bytes)
+}
+
+function Write-CompactJson($Value) {
+    $Value | ConvertTo-Json -Compress | Write-Output
+}
+
+function Save-CogentSpecCredential($Result) {
+    if (-not $Result.token -or -not $Result.renewalToken -or -not $Result.deviceLeaseId) {
+        throw 'CogentSpec returned an incomplete account-bound Desktop credential.'
+    }
+    [ordered]@{
+        token = Protect-CogentSpecValue ([string]$Result.token)
+        renewalToken = Protect-CogentSpecValue ([string]$Result.renewalToken)
+        email = [string]$Result.subscriber.email
+        plan = [string]$Result.subscriber.plan
+        connectedAt = [string]$Result.createdAt
+        deviceLeaseId = [string]$Result.deviceLeaseId
+        installationBound = $true
+    } | ConvertTo-Json | Set-Content -LiteralPath $credentialPath -Encoding UTF8
+}
+
+if ($Mode -eq 'status') {
+    if (Test-Path -LiteralPath $credentialPath) {
+        $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
+        $token = Unprotect-CogentSpecValue ([string]$credential.token)
+        try {
+            $connection = Invoke-RestMethod `
+                -Method Get `
+                -Uri "$serviceUrl/api/device-authorization/token" `
+                -Headers @{ Accept = 'application/json'; Authorization = "Bearer $token" } `
+                -TimeoutSec 20
+            Write-CompactJson ([ordered]@{
+                status = 'connected'
+                email = $connection.subscriber.email
+                plan = $connection.subscriber.plan
+                connectedAt = $credential.connectedAt
+            })
+        } catch {
+            $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+            if ($statusCode -eq 401) {
+                $hasRenewal = $credential.PSObject.Properties.Name -contains 'renewalToken'
+                if ($hasRenewal -and $credential.renewalToken) {
+                    $renewalToken = Unprotect-CogentSpecValue ([string]$credential.renewalToken)
+                    try {
+                        $renewed = Invoke-RestMethod `
+                            -Method Post `
+                            -Uri "$serviceUrl/api/device-authorization/renew" `
+                            -ContentType 'application/json' `
+                            -Headers @{ Accept = 'application/json' } `
+                            -Body (@{ renewalToken = $renewalToken } | ConvertTo-Json -Compress) `
+                            -TimeoutSec 20
+                        Save-CogentSpecCredential $renewed
+                        Write-CompactJson ([ordered]@{
+                            status = 'connected'
+                            email = $renewed.subscriber.email
+                            plan = $renewed.subscriber.plan
+                            connectedAt = $renewed.createdAt
+                            renewed = $true
+                            installationBound = $true
+                        })
+                        exit 0
+                    } catch {
+                        $renewStatus = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+                        if ($renewStatus -eq 428) {
+                            Remove-Item -LiteralPath $credentialPath -Force
+                            Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'legal_update_required' })
+                            exit 0
+                        }
+                        if ($renewStatus -eq 401 -or $renewStatus -eq 403) {
+                            Remove-Item -LiteralPath $credentialPath -Force
+                            Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'installation_replaced_revoked_or_inactive' })
+                            exit 0
+                        }
+                        throw
+                    } finally {
+                        $renewalToken = $null
+                    }
+                }
+                Remove-Item -LiteralPath $credentialPath -Force
+                Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'legacy_connection_not_bound_to_installation' })
+                exit 0
+            }
+            throw
+        }
+    } else {
+        Write-CompactJson ([ordered]@{ status = 'signed_out' })
+    }
+    exit 0
+}
+
+if ($Mode -eq 'disconnect') {
+    if (-not (Test-Path -LiteralPath $credentialPath)) {
+        Write-CompactJson ([ordered]@{ status = 'signed_out' })
+        exit 0
+    }
+    $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
+    $token = Unprotect-CogentSpecValue ([string]$credential.token)
+    try {
+        Invoke-RestMethod `
+            -Method Delete `
+            -Uri "$serviceUrl/api/device-authorization/token" `
+            -Headers @{ Accept = 'application/json'; Authorization = "Bearer $token" } `
+            -TimeoutSec 20 | Out-Null
+    } catch {
+        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+        if ($statusCode -ne 401) { throw }
+    } finally {
+        Remove-Item -LiteralPath $credentialPath -Force
+    }
+    Write-CompactJson ([ordered]@{ status = 'signed_out' })
+    exit 0
+}
+
+New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+
+if ($Mode -eq 'claim') {
+    if ($InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,}$') {
+        throw 'The account-bound installation request is missing or invalid. Copy a fresh request from https://cogentspec.com/install.'
+    }
+    try {
+        $result = Invoke-RestMethod `
+            -Method Post `
+            -Uri "$serviceUrl/api/plugin/bootstrap" `
+            -ContentType 'application/json' `
+            -Headers @{ Accept = 'application/json' } `
+            -Body (@{ code = $InstallationRequest; deviceName = 'ChatGPT Desktop on Windows' } | ConvertTo-Json -Compress) `
+            -TimeoutSec 20
+    } finally {
+        $InstallationRequest = ''
+    }
+    Save-CogentSpecCredential $result
+    if (Test-Path -LiteralPath $pendingPath) { Remove-Item -LiteralPath $pendingPath -Force }
+    Write-CompactJson ([ordered]@{
+        status = 'connected'
+        accountBound = $true
+        installationBound = $true
+        plan = [string]$result.subscriber.plan
+        replacedExistingDevice = [bool]$result.replacedExistingDevice
+    })
+    exit 0
+}
+
+if ($Mode -eq 'start') {
+    $requestBody = @{ deviceName = 'ChatGPT Desktop on Windows' } | ConvertTo-Json -Compress
+    $authorization = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$serviceUrl/api/device-authorization" `
+        -ContentType 'application/json' `
+        -Headers @{ Accept = 'application/json' } `
+        -Body $requestBody `
+        -TimeoutSec 20
+
+    [ordered]@{
+        deviceCode = Protect-CogentSpecValue ([string]$authorization.deviceCode)
+        userCode = [string]$authorization.userCode
+        expiresAt = [string]$authorization.expiresAt
+        intervalSeconds = [int]$authorization.intervalSeconds
+    } | ConvertTo-Json | Set-Content -LiteralPath $pendingPath -Encoding UTF8
+
+    Start-Process ([string]$authorization.verificationUriComplete)
+    Write-CompactJson ([ordered]@{
+        status = 'approval_required'
+        expiresAt = [string]$authorization.expiresAt
+        pollAfterSeconds = [int]$authorization.intervalSeconds
+    })
+    exit 0
+}
+
+if (-not (Test-Path -LiteralPath $pendingPath)) {
+    Write-CompactJson ([ordered]@{ status = 'not_started' })
+    exit 0
+}
+
+$pending = Get-Content -Raw -LiteralPath $pendingPath | ConvertFrom-Json
+if ([DateTimeOffset]::Parse([string]$pending.expiresAt) -le [DateTimeOffset]::UtcNow) {
+    Remove-Item -LiteralPath $pendingPath -Force
+    Write-CompactJson ([ordered]@{ status = 'expired' })
+    exit 0
+}
+
+$deviceCode = Unprotect-CogentSpecValue ([string]$pending.deviceCode)
+$tokenBody = @{ deviceCode = $deviceCode } | ConvertTo-Json -Compress
+try {
+    $result = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$serviceUrl/api/device-authorization/token" `
+        -ContentType 'application/json' `
+        -Headers @{ Accept = 'application/json' } `
+        -Body $tokenBody `
+        -TimeoutSec 20
+} catch {
+    $statusCode = [int]$_.Exception.Response.StatusCode
+    if ($statusCode -eq 410) {
+        Remove-Item -LiteralPath $pendingPath -Force
+        Write-CompactJson ([ordered]@{ status = 'expired' })
+        exit 0
+    }
+    throw
+}
+
+if ([string]$result.status -eq 'authorization_pending') {
+    Write-CompactJson ([ordered]@{
+        status = 'approval_pending'
+        expiresAt = [string]$pending.expiresAt
+        pollAfterSeconds = [int]$pending.intervalSeconds
+    })
+    exit 0
+}
+
+if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $result.browserCode) {
+    throw 'CogentSpec returned an incomplete Desktop authorization.'
+}
+
+Save-CogentSpecCredential $result
+Remove-Item -LiteralPath $pendingPath -Force
+
+$workspaceUrl = "$serviceUrl/stack?surface=$([Uri]::EscapeDataString($Surface))#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
+Write-CompactJson ([ordered]@{
+    status = 'authorized'
+    email = [string]$result.subscriber.email
+    plan = [string]$result.subscriber.plan
+    replacedExistingDevice = [bool]$result.replacedExistingDevice
+    workspaceUrl = $workspaceUrl
+})

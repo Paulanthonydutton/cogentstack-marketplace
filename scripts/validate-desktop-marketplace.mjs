@@ -7,8 +7,8 @@ const manifestPath = join(repositoryRoot, "desktop", "marketplace.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const installInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.md"), "utf8");
 const versionedInstallInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.v3.md"), "utf8");
-const boundedInstaller = await readFile(join(repositoryRoot, ".agents", "plugins", "install-cogentstack.ps1"), "utf8");
-const sourcePluginPath = join(repositoryRoot, "plugins", "cogentstack");
+const boundedInstaller = await readFile(join(repositoryRoot, ".agents", "plugins", "install-cogentspec.ps1"), "utf8");
+const sourcePluginPath = join(repositoryRoot, "plugins", "cogentspec");
 const semver = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 const sha256 = /^[a-f0-9]{64}$/;
 
@@ -62,6 +62,8 @@ for (const requiredInstruction of [
   "codex plugin marketplace list --json",
   "codex plugin marketplace add",
   "codex plugin marketplace upgrade cogentstack",
+  "install-cogentspec.ps1",
+  "$cogentspec",
   "-MarketplacePrepared",
   "-InstallerTimeoutSeconds 120",
   "status: not_started",
@@ -111,6 +113,13 @@ if (JSON.stringify(actualPluginFiles) !== JSON.stringify(allowedPluginFiles)) {
   fail("the bounded installer allowlist does not exactly match the public plugin package");
 }
 
+const marketplace = JSON.parse(await readFile(join(repositoryRoot, ".agents", "plugins", "marketplace.json"), "utf8"));
+const canonicalEntry = marketplace.plugins?.find((entry) => entry.name === "cogentspec");
+const compatibilityEntry = marketplace.plugins?.find((entry) => entry.name === "cogentstack");
+if (marketplace.name !== "cogentstack") fail("the stable marketplace registration id must remain cogentstack");
+if (canonicalEntry?.source?.path !== "./plugins/cogentspec") fail("the canonical CogentSpec plugin entry is missing");
+if (compatibilityEntry?.source?.path !== "./plugins/cogentstack") fail("the CogentStack compatibility entry is missing");
+
 console.log(JSON.stringify({
   status: "valid",
   application: manifest.application,
@@ -122,5 +131,7 @@ console.log(JSON.stringify({
   automaticUpdates: Boolean(windows.updaterSignature),
   automaticLaunch: windows.automaticLaunch,
   installerBootstrap: "trusted-marketplace-v3",
+  canonicalPlugin: "cogentspec",
+  compatibilityPlugin: "cogentstack",
   pluginFiles: actualPluginFiles.length,
 }));
