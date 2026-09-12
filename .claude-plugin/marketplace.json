@@ -1,21 +1,21 @@
 {
   "name": "cogentstack",
   "owner": {
-    "name": "CogentStack"
+    "name": "CogentSpec"
   },
   "metadata": {
-    "description": "CogentStack plugins for Claude Code Desktop"
+    "description": "CogentSpec plugins for Claude Code Desktop"
   },
   "plugins": [
     {
       "name": "cogentstack",
       "source": "./claude-plugins/cogentstack",
-      "description": "Connect each Claude Code Desktop project to its isolated CogentStack Web context through the shared Desktop Bridge without manipulating browser or application windows.",
+      "description": "Connect each Claude Code Desktop project to its isolated CogentSpec Web context through the shared Desktop Bridge without manipulating browser or application windows.",
       "version": "0.3.1",
       "author": {
-        "name": "CogentStack"
+        "name": "CogentSpec"
       },
-      "homepage": "https://cogentstack.app/",
+      "homepage": "https://cogentspec.com/",
       "repository": "https://github.com/cogentspec/cogentspec-marketplace",
       "category": "productivity",
       "keywords": [

@@ -1,6 +1,6 @@
 # Contributing a Community Guardrail Pack
 
-CogentStack accepts declarative guardrail packs through reviewed Git pull requests.
+CogentSpec accepts declarative guardrail packs through reviewed Git pull requests.
 
 ## Submission process
 
@@ -15,8 +15,8 @@ CogentStack accepts declarative guardrail packs through reviewed Git pull reques
 ## Trust levels
 
 - `community`: structurally valid and published by its named contributor.
-- `verified`: independently reviewed against CogentStack engineering and safety criteria.
-- `official`: authored and maintained by CogentStack.
+- `verified`: independently reviewed against CogentSpec engineering and safety criteria.
+- `official`: authored and maintained by CogentSpec.
 - `example`: sanitised protocol demonstration only.
 
 Trust level is assigned by the marketplace registry. A pack cannot award itself `verified` or `official` status.

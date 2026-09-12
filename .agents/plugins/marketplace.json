@@ -1,7 +1,7 @@
 {
   "name": "cogentstack",
   "interface": {
-    "displayName": "CogentStack"
+    "displayName": "CogentSpec"
   },
   "plugins": [
     {

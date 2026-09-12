@@ -7,8 +7,8 @@
   "description": "A sanitised example showing how a community pack can define accessible interface requirements and inspectable acceptance evidence without executable code.",
   "publisher": {
     "id": "cogentstack",
-    "name": "CogentStack",
-    "url": "https://cogentstack.app"
+    "name": "CogentSpec",
+    "url": "https://cogentspec.com"
   },
   "license": "Apache-2.0",
   "projectTypes": ["website", "web_app", "campaign_website", "landing_page"],

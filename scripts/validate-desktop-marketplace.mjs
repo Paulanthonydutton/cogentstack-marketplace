@@ -17,21 +17,22 @@ const fail = (message) => {
 };
 
 if (manifest.schemaVersion !== 1) fail("schemaVersion must be 1");
-if (manifest.application !== "CogentStack Desktop") fail("application identity is invalid");
+if (!["CogentStack Desktop", "CogentSpec Desktop"].includes(manifest.application)) fail("application identity is invalid");
 if (!semver.test(manifest.latestVersion ?? "")) fail("latestVersion must be semantic versioning");
 if (!semver.test(manifest.minimumSupportedVersion ?? "")) fail("minimumSupportedVersion must be semantic versioning");
 
 const expectedTag = `desktop-v${manifest.latestVersion}`;
 if (manifest.releaseTag !== expectedTag) fail(`releaseTag must be ${expectedTag}`);
 if (manifest.releasePageUrl !== `https://github.com/cogentspec/cogentspec-marketplace/releases/tag/${expectedTag}`) {
-  fail("releasePageUrl must use the CogentStack Git marketplace release");
+  fail("releasePageUrl must use the CogentSpec Git marketplace release");
 }
 if (!Array.isArray(manifest.releaseNotes) || manifest.releaseNotes.length === 0 || manifest.releaseNotes.some((note) => typeof note !== "string" || !note.trim() || note.length > 240)) {
   fail("releaseNotes must contain concise non-empty entries");
 }
 
 const windows = manifest.windows ?? {};
-const expectedFilename = `CogentStack-Desktop-${manifest.latestVersion}-x64-setup.exe`;
+const applicationStem = manifest.application === "CogentStack Desktop" ? "CogentStack" : "CogentSpec";
+const expectedFilename = `${applicationStem}-Desktop-${manifest.latestVersion}-x64-setup.exe`;
 const expectedInstallerUrl = `https://github.com/cogentspec/cogentspec-marketplace/releases/download/${expectedTag}/${expectedFilename}`;
 if (windows.architecture !== "x64") fail("the first Windows release must target x64");
 if (windows.installerUrl !== expectedInstallerUrl) fail("installerUrl must be the versioned GitHub Release asset");
@@ -87,7 +88,7 @@ for (const requiredInstallerMarker of [
   "accountRequestConsumed = if ($claimSucceeded)",
   "exactReason = [string]$_.Exception.Message",
   "installerElapsedMs = [int]$timer.ElapsedMilliseconds",
-  "The installer is not running from the prepared CogentStack marketplace.",
+  "The installer is not running from the prepared CogentSpec marketplace.",
 ]) {
   if (!boundedInstaller.includes(requiredInstallerMarker)) fail(`the bounded installer is missing ${requiredInstallerMarker}`);
 }

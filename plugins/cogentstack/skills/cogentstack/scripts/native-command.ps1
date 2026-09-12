@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-function Invoke-CogentStackNativeCommand {
+function Invoke-CogentSpecNativeCommand {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]

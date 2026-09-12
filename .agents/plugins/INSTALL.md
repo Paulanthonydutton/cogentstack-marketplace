@@ -1,8 +1,8 @@
-# Install CogentStack for ChatGPT Desktop
+# Install CogentSpec for ChatGPT Desktop
 
 Protocol: **trusted-marketplace-v3**
 
-Carry out the installation as a small deterministic operation. Do not launch CogentStack, open browser tabs, scan tasks, sessions, memories, or unrelated files, download executable code with a shell HTTP command, or reuse a failure description from an earlier attempt.
+Carry out the installation as a small deterministic operation. Do not launch CogentSpec, open browser tabs, scan tasks, sessions, memories, or unrelated files, download executable code with a shell HTTP command, or reuse a failure description from an earlier attempt.
 
 1. Require exactly one opaque `Account-bound installation request: cgb_...` reference in the **current user message**. Never recover or reuse a reference from an earlier message, task, conversation, clipboard, file, log, or memory. If the current message does not contain exactly one valid reference, do not run a command. Return `status: not_started`, `failureStage: current_message_validation`, `installerStarted: false`, `claimAttempted: false`, `accountRequestConsumed: false`, and the exact reason.
 2. Do not start, estimate, announce, or expire an agent-side installation deadline. Reasoning time and commentary time are not installer time. Only the running installer process owns and reports its timeout.
@@ -17,10 +17,10 @@ Carry out the installation as a small deterministic operation. Do not launch Cog
 7. If marketplace preparation fails before the installer starts, report this truthfully as `status: not_started` and `installerStarted: false`. Include the actual failed marketplace operation and its exact error. Never describe it as an installer timeout or command-policy block unless that event actually occurred.
 8. Never retry automatically after a claim was attempted. If `accountRequestConsumed` is `null`, report that the claim outcome is uncertain and require the installation page's authoritative status before any new request. Never substitute an older package, `/activate`, localhost, an embedded-panel login, or another installation route.
 
-The installer verifies `https://cogentstack.app/stack`, the prepared Git remote and sparse paths, plugin installation and enabled state, version parity, exact public-file allowlist and source hashes, Desktop Bridge safeguards, and the one permitted account-bound claim. Its process-owned timeout stops a running child command; it does not measure or make claims about Codex reasoning time.
+The installer verifies `https://cogentspec.com/stack`, the prepared Git remote and sparse paths, plugin installation and enabled state, version parity, exact public-file allowlist and source hashes, Desktop Bridge safeguards, and the one permitted account-bound claim. Its process-owned timeout stops a running child command; it does not measure or make claims about Codex reasoning time.
 
 The installed package allowlist is the manifest, two brand assets, launcher skill, presentation metadata, `connect-cogentstack.ps1`, `start-cogentstack-bridge.ps1`, `watch-cogentstack-bridge.ps1`, `fulfil-project.ps1`, `generate-project-preview.ps1`, `delete-project.ps1`, `prepare-deployment.ps1`, `project-context.ps1`, `project-knowledge.ps1`, and `native-command.ps1`. No browser-window arranger, embedded companion launcher, contracts, task blueprints, licence-validation rules, compatibility rules, or local project-generation logic may be distributed.
 
 When the installer returns verified success, display exactly:
 
-**CogentStack Desktop Bridge is installed. In the ChatGPT, Codex, or Claude project you want to connect, enter $cogentstack. The command returns that project’s CogentStack Web link and does not open or rearrange browser windows.**
+**CogentSpec Desktop Bridge is installed. In the ChatGPT, Codex, or Claude project you want to connect, enter $cogentstack. The command returns that project’s CogentSpec Web link and does not open or rearrange browser windows.**

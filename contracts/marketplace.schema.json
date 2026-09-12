@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cogentstack.app/schemas/contract-marketplace-v0.1.json",
-  "title": "CogentStack Contract Marketplace",
+  "$id": "https://cogentspec.com/schemas/contract-marketplace-v0.1.json",
+  "title": "CogentSpec Contract Marketplace",
   "type": "object",
   "additionalProperties": false,
   "required": ["protocolVersion", "updatedAt", "entries"],

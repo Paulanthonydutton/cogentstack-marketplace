@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'native-command.ps1')
 . (Join-Path $PSScriptRoot 'project-context.ps1')
-$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
+$projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
 $contextQuery = "context=$([Uri]::EscapeDataString($projectContext.ContextKey))"
 
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
@@ -20,8 +20,8 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     }
 }
 
-$serviceUrl = 'https://cogentstack.app'
-$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
+$serviceUrl = 'https://cogentspec.com'
+$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
 
 function Write-CompactJson($Value) {
@@ -37,7 +37,7 @@ function Write-DesktopAuthorizationRequired([string]$Reason) {
     })
 }
 
-function Unprotect-CogentStackValue([string]$Value) {
+function Unprotect-CogentSpecValue([string]$Value) {
     $protected = [Convert]::FromBase64String($Value)
     $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
         $protected,
@@ -47,7 +47,7 @@ function Unprotect-CogentStackValue([string]$Value) {
     return [Text.Encoding]::UTF8.GetString($bytes)
 }
 
-function Invoke-CogentStackApi(
+function Invoke-CogentSpecApi(
     [string]$Method,
     [string]$Path,
     [string]$Token,
@@ -106,9 +106,9 @@ if (-not (Test-Path -LiteralPath $credentialPath)) {
 }
 
 $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
-$token = Unprotect-CogentStackValue ([string]$credential.token)
+$token = Unprotect-CogentSpecValue ([string]$credential.token)
 try {
-    $listing = Invoke-CogentStackApi -Method Get -Path "/api/plugin/project-requests?status=requested&limit=20&$contextQuery" -Token $token
+    $listing = Invoke-CogentSpecApi -Method Get -Path "/api/plugin/project-requests?status=requested&limit=20&$contextQuery" -Token $token
 } catch {
     $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
     if ($statusCode -eq 401) {
@@ -152,23 +152,23 @@ $artifactDigest = ''
 $claimed = $false
 
 try {
-    $claim = Invoke-CogentStackApi -Method Post -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
+    $claim = Invoke-CogentSpecApi -Method Post -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
         action = 'claim'
         requestId = $RequestId
     }
     if ([string]$claim.status -ne 'claimed' -or $null -eq $claim.artifact -or [string]::IsNullOrWhiteSpace([string]$claim.executionGrant)) {
-        throw 'CogentStack returned an incomplete project artifact.'
+        throw 'CogentSpec returned an incomplete project artifact.'
     }
     $claimed = $true
     $executionGrant = [string]$claim.executionGrant
     $artifactDigest = [string]$claim.artifact.digest
     if ($artifactDigest -notmatch '^[0-9a-f]{64}$') {
-        throw 'CogentStack returned an invalid project artifact digest.'
+        throw 'CogentSpec returned an invalid project artifact digest.'
     }
 
     $files = @($claim.artifact.files)
     if ($files.Count -eq 0 -or $files.Count -gt 200) {
-        throw 'CogentStack returned an invalid project artifact file count.'
+        throw 'CogentSpec returned an invalid project artifact file count.'
     }
 
     $canonical = New-Object Text.StringBuilder
@@ -177,22 +177,22 @@ try {
     foreach ($file in $files) {
         $artifactPath = ([string]$file.path).Replace('\', '/')
         if (-not (Test-ArtifactPath $artifactPath)) {
-            throw "CogentStack returned an unsafe project artifact path: $artifactPath"
+            throw "CogentSpec returned an unsafe project artifact path: $artifactPath"
         }
         if (-not $seenPaths.Add($artifactPath)) {
-            throw "CogentStack returned a duplicate project artifact path: $artifactPath"
+            throw "CogentSpec returned a duplicate project artifact path: $artifactPath"
         }
         $expectedHash = [string]$file.sha256
         if ($expectedHash -notmatch '^[0-9a-f]{64}$') {
-            throw "CogentStack returned an invalid checksum for $artifactPath"
+            throw "CogentSpec returned an invalid checksum for $artifactPath"
         }
         $bytes = [Convert]::FromBase64String([string]$file.contentBase64)
         if ($bytes.Length -gt 1500000) {
-            throw "CogentStack returned an oversized project artifact file: $artifactPath"
+            throw "CogentSpec returned an oversized project artifact file: $artifactPath"
         }
         $totalBytes += $bytes.Length
         if ($totalBytes -gt 6000000) {
-            throw 'CogentStack returned an oversized project artifact.'
+            throw 'CogentSpec returned an oversized project artifact.'
         }
         if ((Get-Sha256Hex $bytes) -ne $expectedHash) {
             throw "Project artifact verification failed for $artifactPath"
@@ -223,42 +223,42 @@ try {
         [IO.File]::WriteAllBytes($destination, [Convert]::FromBase64String([string]$file.contentBase64))
     }
 
-    $installResult = Invoke-CogentStackNativeCommand -FilePath 'npm.cmd' -ArgumentList @(
+    $installResult = Invoke-CogentSpecNativeCommand -FilePath 'npm.cmd' -ArgumentList @(
         'ci', '--prefer-offline', '--no-audit', '--no-fund', '--prefix', $targetPath
     )
     if ($installResult.ExitCode -ne 0) {
         throw "Dependency installation failed: $($installResult.Output)"
     }
-    $testResult = Invoke-CogentStackNativeCommand -FilePath 'npm.cmd' -ArgumentList @(
+    $testResult = Invoke-CogentSpecNativeCommand -FilePath 'npm.cmd' -ArgumentList @(
         'test', '--prefix', $targetPath
     )
     if ($testResult.ExitCode -ne 0) {
         throw "Project acceptance tests failed: $($testResult.Output)"
     }
 
-    $gitInitResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'init', '--quiet')
+    $gitInitResult = Invoke-CogentSpecNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'init', '--quiet')
     if ($gitInitResult.ExitCode -ne 0) { throw 'Git initialization failed.' }
-    $gitAddResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'add', '-A')
+    $gitAddResult = Invoke-CogentSpecNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'add', '-A')
     if ($gitAddResult.ExitCode -ne 0) { throw 'Git staging failed.' }
 
-    $gitNameResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.name')
+    $gitNameResult = Invoke-CogentSpecNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.name')
     if ($gitNameResult.ExitCode -ne 0 -or -not $gitNameResult.Output) {
-        $gitSetNameResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.name', 'CogentStack Desktop')
+        $gitSetNameResult = Invoke-CogentSpecNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.name', 'CogentSpec Desktop')
         if ($gitSetNameResult.ExitCode -ne 0) { throw 'Git identity configuration failed.' }
     }
-    $gitEmailResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.email')
+    $gitEmailResult = Invoke-CogentSpecNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.email')
     if ($gitEmailResult.ExitCode -ne 0 -or -not $gitEmailResult.Output) {
-        $gitSetEmailResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.email', 'desktop@cogentstack.local')
+        $gitSetEmailResult = Invoke-CogentSpecNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'config', 'user.email', 'desktop@cogentstack.local')
         if ($gitSetEmailResult.ExitCode -ne 0) { throw 'Git identity configuration failed.' }
     }
 
-    $gitCommitResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'commit', '--quiet', '-m', 'Initialize CogentStack project foundation')
+    $gitCommitResult = Invoke-CogentSpecNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'commit', '--quiet', '-m', 'Initialize CogentSpec project foundation')
     if ($gitCommitResult.ExitCode -ne 0) { throw 'Git baseline commit failed.' }
-    $gitRevisionResult = Invoke-CogentStackNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'rev-parse', 'HEAD')
+    $gitRevisionResult = Invoke-CogentSpecNativeCommand -FilePath 'git' -ArgumentList @('-C', $targetPath, 'rev-parse', 'HEAD')
     if ($gitRevisionResult.ExitCode -ne 0 -or -not $gitRevisionResult.Output) { throw 'Git baseline revision could not be read.' }
     $commit = $gitRevisionResult.Output
 
-    $completed = Invoke-CogentStackApi -Method Patch -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
+    $completed = Invoke-CogentSpecApi -Method Patch -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
         action = 'complete'
         requestId = $RequestId
         artifactDigest = $artifactDigest
@@ -280,7 +280,7 @@ try {
     $message = $_.Exception.Message
     if ($claimed -and $executionGrant -and $artifactDigest) {
         try {
-            Invoke-CogentStackApi -Method Patch -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
+            Invoke-CogentSpecApi -Method Patch -Path "/api/plugin/project-requests?$contextQuery" -Token $token -Body @{
                 action = 'fail'
                 requestId = $RequestId
                 artifactDigest = $artifactDigest

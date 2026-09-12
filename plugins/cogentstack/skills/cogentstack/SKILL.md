@@ -1,11 +1,11 @@
 ---
 name: cogentstack
-description: Connect the current ChatGPT, Codex, or Claude project to its isolated CogentStack Web context through Desktop Bridge; restore portable repository knowledge; fulfil an approved project; generate its verified local preview; prepare an approved deployment handoff; or execute a deletion approved in CogentStack Web. Use when the user invokes CogentStack, $cogentstack, or @cogentstack, asks to connect or open CogentStack Web, load or edit an existing CogentStack project, create an approved project, view the active project, prepare an approved Deployment Pack, or delete a project and its folder.
+description: Connect the current ChatGPT, Codex, or Claude project to its isolated CogentSpec Web context through Desktop Bridge; restore portable repository knowledge; fulfil an approved project; generate its verified local preview; prepare an approved deployment handoff; or execute a deletion approved in CogentSpec Web. Use when the user invokes CogentSpec, $cogentstack, or @cogentstack, asks to connect or open CogentSpec Web, load or edit an existing CogentSpec project, create an approved project, view the active project, prepare an approved Deployment Pack, or delete a project and its folder.
 ---
 
-# Use CogentStack Web through Desktop Bridge
+# Use CogentSpec Web through Desktop Bridge
 
-CogentStack is a normal web application. Official ChatGPT, Codex, and Claude desktop applications remain separate. The installed Desktop Bridge connects approved web actions to this Windows computer; it does not embed, crop, resize, cover, or join another application's window. Qwen Desktop is an optional CogentStack-owned integrated application and includes the same Bridge rather than installing another copy.
+CogentSpec is a normal web application. Official ChatGPT, Codex, and Claude desktop applications remain separate. The installed Desktop Bridge connects approved web actions to this Windows computer; it does not embed, crop, resize, cover, or join another application's window. Qwen Desktop is an optional CogentSpec-owned integrated application and includes the same Bridge rather than installing another copy.
 
 Resolve the current ChatGPT Project or Codex work area with `scripts/project-context.ps1`. Its one-way, non-secret context key is the logical project identity. Pass it through every protected request and helper. Each context has independent contract, request, active-project, Git, preview, and deployment state. The completed-project library remains shared. Never guess a context from a conversation title and never use a broad home, temporary, plugin-cache, or marketplace directory as project identity.
 
@@ -13,14 +13,14 @@ Run helpers from the invoking task's workspace directory, never from the plugin 
 
 ## Connect the current AI project
 
-Treat `$cogentstack`, `@cogentstack`, a CogentStack plugin mention, and a natural-language request to connect or open CogentStack as the same request.
+Treat `$cogentstack`, `@cogentstack`, a CogentSpec plugin mention, and a natural-language request to connect or open CogentSpec as the same request.
 
 1. Run `scripts/project-context.ps1` exactly once and require an isolated stable context unless the task is genuinely unscoped.
-2. Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once. This helper performs the one account-status check itself. Require `status: ready`, the same `contextKey`, `accountState: signed_in`, and `browserOpened: false`. Accept either `bridge: started` or `bridge: already_running`. If it returns `signed_out`, explain that Desktop Bridge is missing, replaced, revoked, or requires updated legal acceptance according to its exact reason. Direct the user to `https://cogentstack.app/install`; never request a login, licence key, activation code, legal confirmation, or Desktop credential in the conversation.
-3. Return the exact `workspaceUrl` as the CogentStack Web link. Do not open it, call a browser-control tool, create or select a browser tab, inspect unrelated tabs, hide a sidebar, resize a window, arrange a split, or mount an embedded panel.
+2. Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once. This helper performs the one account-status check itself. Require `status: ready`, the same `contextKey`, `accountState: signed_in`, and `browserOpened: false`. Accept either `bridge: started` or `bridge: already_running`. If it returns `signed_out`, explain that Desktop Bridge is missing, replaced, revoked, or requires updated legal acceptance according to its exact reason. Direct the user to `https://cogentspec.com/install`; never request a login, licence key, activation code, legal confirmation, or Desktop credential in the conversation.
+3. Return the exact `workspaceUrl` as the CogentSpec Web link. Do not open it, call a browser-control tool, create or select a browser tab, inspect unrelated tabs, hide a sidebar, resize a window, arrange a split, or mount an embedded panel.
 4. Report only the verified connection state. Readiness without `status: ready` is not a successful connection.
 
-The user decides where to open the returned web link. Switching AI projects changes the context in the URL and starts or reuses that context's Bridge worker; it does not create a permanent CogentStack browser tab for every project.
+The user decides where to open the returned web link. Switching AI projects changes the context in the URL and starts or reuses that context's Bridge worker; it does not create a permanent CogentSpec browser tab for every project.
 
 ## Account and service boundaries
 
@@ -28,7 +28,7 @@ The user decides where to open the returned web link. Switching AI projects chan
 - The installation page supplies one opaque, single-use account-bound reference after explicit legal confirmation. Never recover or reuse one from an earlier message, file, log, clipboard, task, or memory.
 - The installer stores a DPAPI-protected access and renewal credential for the current Windows user. Never display, copy, or transmit those values except through the supplied connection helper.
 - Only one active Desktop Bridge lease exists per account. Installing Qwen Desktop uses that same lease and Bridge.
-- CogentStack's protected server is authoritative for contract selection, project artifacts, compatibility, execution grants, and lifecycle state. Do not infer or reconstruct proprietary contract content locally.
+- CogentSpec's protected server is authoritative for contract selection, project artifacts, compatibility, execution grants, and lifecycle state. Do not infer or reconstruct proprietary contract content locally.
 
 ## Create an approved project
 
@@ -47,11 +47,11 @@ Manual recovery is allowed only when the automatic Bridge queue is unavailable:
 
 ## Restore portable knowledge
 
-New projects contain `AGENTS.md`, `PROJECT_KNOWLEDGE.md`, `CURRENT_STATE.md`, `HANDOFF.md`, `docs/decisions/`, and `.coge/knowledge-manifest.json`. Git carries durable project knowledge; CogentStack restores protected server state through the safe project request identifier.
+New projects contain `AGENTS.md`, `PROJECT_KNOWLEDGE.md`, `CURRENT_STATE.md`, `HANDOFF.md`, `docs/decisions/`, and `.coge/knowledge-manifest.json`. Git carries durable project knowledge; CogentSpec restores protected server state through the safe project request identifier.
 
 When an existing project is loaded in another AI project:
 
-1. Load it in CogentStack Web for the current logical context.
+1. Load it in CogentSpec Web for the current logical context.
 2. Run `scripts/project-knowledge.ps1 -Mode inspect` once.
 3. Read the returned knowledge before changing the project.
 4. Never run `git pull` automatically. Show branch, revision, dirty state, and proposed Git action; fetch or fast-forward only after explicit approval and never overwrite dirty work.
@@ -60,7 +60,7 @@ When an existing project is loaded in another AI project:
 
 ## Generate or restart the active preview
 
-The hosted **Open saved preview** or **Start project preview** button queues `preview_project` for Desktop Bridge. The Bridge runs `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>`, verifies that the listener and process tree belong to the exact active project, records the healthy loopback URL, and opens that verified URL in the user's normal browser. It never navigates away from the CogentStack workspace.
+The hosted **Open saved preview** or **Start project preview** button queues `preview_project` for Desktop Bridge. The Bridge runs `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>`, verifies that the listener and process tree belong to the exact active project, records the healthy loopback URL, and opens that verified URL in the user's normal browser. It never navigates away from the CogentSpec workspace.
 
 The saved port is a preference, not proof of a live process. Accept only `status: generated` or `status: already_running` with `remembered: true`. Routine viewing of an already-running preview uses the hosted **View project** button and does not invoke an agent.
 

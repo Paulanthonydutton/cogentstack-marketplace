@@ -23,9 +23,9 @@ function Get-TextSha256([string]$Value) {
     }
 }
 
-$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
+$projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
 $resolvedContext = [string]$projectContext.ContextKey
-$workspaceUrl = "https://cogentstack.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
+$workspaceUrl = "https://cogentspec.com/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
 $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
 $sourceScriptNames = @(
     'connect-cogentstack.ps1',
@@ -37,7 +37,7 @@ $sourceScriptNames = @(
     'watch-cogentstack-bridge.ps1'
 )
 if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($sourceScriptNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $_) -PathType Leaf) }).Count -gt 0) {
-    throw 'Desktop Bridge is incomplete. Repair the CogentStack installation.'
+    throw 'Desktop Bridge is incomplete. Repair the CogentSpec installation.'
 }
 
 $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -58,7 +58,7 @@ if ([string]$connection.status -ne 'connected') {
     exit 0
 }
 
-$localStateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
+$localStateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $stateRoot = Join-Path $localStateRoot 'bridge'
 [void](New-Item -ItemType Directory -Path $stateRoot -Force)
 $sourceHashes = $sourceScriptNames | ForEach-Object { (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $_) -Algorithm SHA256).Hash.ToLowerInvariant() }

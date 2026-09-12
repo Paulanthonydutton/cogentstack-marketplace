@@ -19,12 +19,12 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     }
 }
 
-$serviceUrl = 'https://cogentstack.app'
-$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
+$serviceUrl = 'https://cogentspec.com'
+$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $pendingPath = Join-Path $stateRoot 'desktop-authorization.json'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
 
-function Protect-CogentStackValue([string]$Value) {
+function Protect-CogentSpecValue([string]$Value) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
     $protected = [System.Security.Cryptography.ProtectedData]::Protect(
         $bytes,
@@ -34,7 +34,7 @@ function Protect-CogentStackValue([string]$Value) {
     return [Convert]::ToBase64String($protected)
 }
 
-function Unprotect-CogentStackValue([string]$Value) {
+function Unprotect-CogentSpecValue([string]$Value) {
     $protected = [Convert]::FromBase64String($Value)
     $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
         $protected,
@@ -48,13 +48,13 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Compress | Write-Output
 }
 
-function Save-CogentStackCredential($Result) {
+function Save-CogentSpecCredential($Result) {
     if (-not $Result.token -or -not $Result.renewalToken -or -not $Result.deviceLeaseId) {
-        throw 'CogentStack returned an incomplete account-bound Desktop credential.'
+        throw 'CogentSpec returned an incomplete account-bound Desktop credential.'
     }
     [ordered]@{
-        token = Protect-CogentStackValue ([string]$Result.token)
-        renewalToken = Protect-CogentStackValue ([string]$Result.renewalToken)
+        token = Protect-CogentSpecValue ([string]$Result.token)
+        renewalToken = Protect-CogentSpecValue ([string]$Result.renewalToken)
         email = [string]$Result.subscriber.email
         plan = [string]$Result.subscriber.plan
         connectedAt = [string]$Result.createdAt
@@ -66,7 +66,7 @@ function Save-CogentStackCredential($Result) {
 if ($Mode -eq 'status') {
     if (Test-Path -LiteralPath $credentialPath) {
         $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
-        $token = Unprotect-CogentStackValue ([string]$credential.token)
+        $token = Unprotect-CogentSpecValue ([string]$credential.token)
         try {
             $connection = Invoke-RestMethod `
                 -Method Get `
@@ -84,7 +84,7 @@ if ($Mode -eq 'status') {
             if ($statusCode -eq 401) {
                 $hasRenewal = $credential.PSObject.Properties.Name -contains 'renewalToken'
                 if ($hasRenewal -and $credential.renewalToken) {
-                    $renewalToken = Unprotect-CogentStackValue ([string]$credential.renewalToken)
+                    $renewalToken = Unprotect-CogentSpecValue ([string]$credential.renewalToken)
                     try {
                         $renewed = Invoke-RestMethod `
                             -Method Post `
@@ -93,7 +93,7 @@ if ($Mode -eq 'status') {
                             -Headers @{ Accept = 'application/json' } `
                             -Body (@{ renewalToken = $renewalToken } | ConvertTo-Json -Compress) `
                             -TimeoutSec 20
-                        Save-CogentStackCredential $renewed
+                        Save-CogentSpecCredential $renewed
                         Write-CompactJson ([ordered]@{
                             status = 'connected'
                             email = $renewed.subscriber.email
@@ -138,7 +138,7 @@ if ($Mode -eq 'disconnect') {
         exit 0
     }
     $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
-    $token = Unprotect-CogentStackValue ([string]$credential.token)
+    $token = Unprotect-CogentSpecValue ([string]$credential.token)
     try {
         Invoke-RestMethod `
             -Method Delete `
@@ -159,7 +159,7 @@ New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 
 if ($Mode -eq 'claim') {
     if ($InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,}$') {
-        throw 'The account-bound installation request is missing or invalid. Copy a fresh request from https://cogentstack.app/install.'
+        throw 'The account-bound installation request is missing or invalid. Copy a fresh request from https://cogentspec.com/install.'
     }
     try {
         $result = Invoke-RestMethod `
@@ -172,7 +172,7 @@ if ($Mode -eq 'claim') {
     } finally {
         $InstallationRequest = ''
     }
-    Save-CogentStackCredential $result
+    Save-CogentSpecCredential $result
     if (Test-Path -LiteralPath $pendingPath) { Remove-Item -LiteralPath $pendingPath -Force }
     Write-CompactJson ([ordered]@{
         status = 'connected'
@@ -195,7 +195,7 @@ if ($Mode -eq 'start') {
         -TimeoutSec 20
 
     [ordered]@{
-        deviceCode = Protect-CogentStackValue ([string]$authorization.deviceCode)
+        deviceCode = Protect-CogentSpecValue ([string]$authorization.deviceCode)
         userCode = [string]$authorization.userCode
         expiresAt = [string]$authorization.expiresAt
         intervalSeconds = [int]$authorization.intervalSeconds
@@ -222,7 +222,7 @@ if ([DateTimeOffset]::Parse([string]$pending.expiresAt) -le [DateTimeOffset]::Ut
     exit 0
 }
 
-$deviceCode = Unprotect-CogentStackValue ([string]$pending.deviceCode)
+$deviceCode = Unprotect-CogentSpecValue ([string]$pending.deviceCode)
 $tokenBody = @{ deviceCode = $deviceCode } | ConvertTo-Json -Compress
 try {
     $result = Invoke-RestMethod `
@@ -252,10 +252,10 @@ if ([string]$result.status -eq 'authorization_pending') {
 }
 
 if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $result.browserCode) {
-    throw 'CogentStack returned an incomplete Desktop authorization.'
+    throw 'CogentSpec returned an incomplete Desktop authorization.'
 }
 
-Save-CogentStackCredential $result
+Save-CogentSpecCredential $result
 Remove-Item -LiteralPath $pendingPath -Force
 
 $workspaceUrl = "$serviceUrl/stack?surface=$([Uri]::EscapeDataString($Surface))#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"

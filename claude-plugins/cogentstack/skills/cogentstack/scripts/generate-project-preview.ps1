@@ -13,7 +13,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'native-command.ps1')
 . (Join-Path $PSScriptRoot 'project-context.ps1')
-$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
+$projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
 $contextQuery = "context=$([Uri]::EscapeDataString($projectContext.ContextKey))"
 
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
@@ -24,8 +24,8 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     }
 }
 
-$serviceUrl = 'https://cogentstack.app'
-$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
+$serviceUrl = 'https://cogentspec.com'
+$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
 $watcherRoot = Join-Path $stateRoot 'preview-watchers'
 
@@ -38,7 +38,7 @@ function Write-Utf8NoBom([string]$LiteralPath, [string]$Value) {
     [IO.File]::WriteAllText($LiteralPath, $Value, $encoding)
 }
 
-function Unprotect-CogentStackValue([string]$Value) {
+function Unprotect-CogentSpecValue([string]$Value) {
     $protected = [Convert]::FromBase64String($Value)
     $bytes = [Security.Cryptography.ProtectedData]::Unprotect(
         $protected,
@@ -52,10 +52,10 @@ function Get-DesktopToken {
     if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) { return '' }
     $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
     if (-not $credential.token) { return '' }
-    return Unprotect-CogentStackValue ([string]$credential.token)
+    return Unprotect-CogentSpecValue ([string]$credential.token)
 }
 
-function Invoke-CogentStackApi([string]$Method, [string]$Path, [string]$Token, $Body = $null) {
+function Invoke-CogentSpecApi([string]$Method, [string]$Path, [string]$Token, $Body = $null) {
     $parameters = @{
         Method = $Method
         Uri = "$serviceUrl$Path"
@@ -149,7 +149,7 @@ function Find-ProjectPreview([string]$ExactTargetPath, [string[]]$RememberedUrls
 }
 
 function Report-PreviewState([string]$Token, [string]$ExactRequestId, [string]$ExactTargetPath, [string]$State, [string]$Url, [int]$ListenerProcessId) {
-    return Invoke-CogentStackApi -Method Put -Path "/api/plugin/project-runtime?$contextQuery" -Token $Token -Body @{
+    return Invoke-CogentSpecApi -Method Put -Path "/api/plugin/project-runtime?$contextQuery" -Token $Token -Body @{
         requestId = $ExactRequestId
         targetPath = $ExactTargetPath
         state = $State
@@ -222,7 +222,7 @@ if (-not $token) {
 }
 
 try {
-    $listing = Invoke-CogentStackApi -Method Get -Path "/api/plugin/project-runtime?$contextQuery" -Token $token
+    $listing = Invoke-CogentSpecApi -Method Get -Path "/api/plugin/project-runtime?$contextQuery" -Token $token
 } catch {
     $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
     if ($statusCode -eq 401) {
@@ -240,7 +240,7 @@ if (-not $listing.activeProject) {
 $activeProject = $listing.activeProject
 $exactRequestId = [string]$activeProject.requestId
 $exactTarget = Resolve-ExactProjectTarget ([string]$activeProject.targetPath)
-if ($exactRequestId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'CogentStack returned an invalid active project identity.' }
+if ($exactRequestId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'CogentSpec returned an invalid active project identity.' }
 
 $runtimePath = Join-Path $exactTarget '.coge\runtime.json'
 $rememberedUrls = New-Object 'Collections.Generic.List[string]'
@@ -275,7 +275,7 @@ if (-not $verifiedPreview) {
     }
     $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $powershellCommand) { throw 'Windows PowerShell is required to generate the local preview.' }
-    $result = Invoke-CogentStackNativeCommand -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
+    $result = Invoke-CogentSpecNativeCommand -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $startScript, '-PreferredPort', [string]$preferredPort
     )
     if ($result.ExitCode -ne 0) { throw "Local preview generation failed: $($result.Output)" }
@@ -283,7 +283,7 @@ if (-not $verifiedPreview) {
     if (-not $jsonLine) { throw 'The local preview launcher did not return its verified address.' }
     $started = $jsonLine | ConvertFrom-Json
     $verifiedPreview = Get-VerifiedPreview ([string]$started.url) $exactTarget
-    if (-not $verifiedPreview) { throw 'The generated preview does not belong to the exact active CogentStack project.' }
+    if (-not $verifiedPreview) { throw 'The generated preview does not belong to the exact active CogentSpec project.' }
     $generated = $true
 }
 

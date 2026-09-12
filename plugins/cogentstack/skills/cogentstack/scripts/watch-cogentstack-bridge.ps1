@@ -11,8 +11,8 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     catch { Add-Type -AssemblyName System.Security -ErrorAction Stop }
 }
 
-$serviceUrl = 'https://cogentstack.app'
-$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
+$serviceUrl = 'https://cogentspec.com'
+$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
 $contextQuery = "context=$([Uri]::EscapeDataString($ContextKey))"
 $contextHashAlgorithm = [Security.Cryptography.SHA256]::Create()
@@ -22,10 +22,10 @@ try {
     $contextHashAlgorithm.Dispose()
 }
 $contextHash = ([BitConverter]::ToString($contextHashBytes)).Replace('-', '').ToLowerInvariant().Substring(0, 24)
-$mutex = New-Object Threading.Mutex($false, "Local\CogentStackBridge-$contextHash")
+$mutex = New-Object Threading.Mutex($false, "Local\CogentSpecBridge-$contextHash")
 $ownsMutex = $false
 
-function Unprotect-CogentStackValue([string]$Value) {
+function Unprotect-CogentSpecValue([string]$Value) {
     $protected = [Convert]::FromBase64String($Value)
     $bytes = [Security.Cryptography.ProtectedData]::Unprotect(
         $protected,
@@ -39,7 +39,7 @@ function Get-DesktopToken {
     if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) { return '' }
     $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
     if (-not $credential.token) { return '' }
-    return Unprotect-CogentStackValue ([string]$credential.token)
+    return Unprotect-CogentSpecValue ([string]$credential.token)
 }
 
 function Invoke-BridgeApi([string]$Method, [string]$Path, [string]$Token, $Body = $null) {
@@ -122,7 +122,7 @@ try {
                 $result = Invoke-ActionHelper $claimed.request
                 $summary = switch ([string]$claimed.request.action) {
                     'create_project' { 'Project foundation created and verified.' }
-                    'delete_project' { 'Project, folder, and linked CogentStack state deleted.' }
+                    'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
                 }
                 Invoke-BridgeApi -Method Patch -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token -Body @{

@@ -28,11 +28,11 @@ const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentstack", "skills"
 
 if (manifest.name !== "cogentstack") fail("plugin manifest name must be cogentstack");
 if (manifest.version !== pluginEntry.version) fail("marketplace and plugin versions differ");
-if (!skill.startsWith("---\nname: cogentstack\n")) fail("skill frontmatter is invalid");
+if (!normalized(skill).startsWith("---\nname: cogentstack\n")) fail("skill frontmatter is invalid");
 for (const marker of [
   "$cogentstack",
   "${CLAUDE_PLUGIN_ROOT}",
-  "CogentStack is a normal web application",
+  "CogentSpec is a normal web application",
   "start-cogentstack-bridge.ps1",
   "browserOpened: false",
   "create_project",

@@ -1,8 +1,8 @@
 {
   "name": "cogentstack",
   "version": "0.5.0+codex.20260908202540",
-  "description": "Connect isolated AI project contexts to CogentStack Web through one account-bound Desktop Bridge, restore portable Git-backed knowledge, and execute approved local actions.",
-  "homepage": "https://cogentstack.app/install",
+  "description": "Connect isolated AI project contexts to CogentSpec Web through one account-bound Desktop Bridge, restore portable Git-backed knowledge, and execute approved local actions.",
+  "homepage": "https://cogentspec.com/install",
   "repository": "https://github.com/cogentspec/cogentspec-marketplace",
   "author": {
     "name": "Paula"
@@ -14,23 +14,23 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "CogentStack",
-    "shortDescription": "CogentStack Web, one Bridge, isolated AI contexts.",
-    "longDescription": "CogentStack keeps official ChatGPT, Codex, and Claude desktop applications independent and connects their isolated project contexts to CogentStack Web through one account-bound Desktop Bridge. Invoking CogentStack resolves the current stable project context, starts or reuses its quiet Bridge worker, and returns the exact web workspace link without opening a browser, creating tabs, inspecting unrelated pages, hiding sidebars, or resizing windows. Approved project creation, permanent deletion, and verified local-preview requests are queued by the hosted workspace and executed through narrow server-authoritative helpers. Qwen Desktop remains an optional CogentStack-owned integrated local, cloud, and hybrid workspace and includes the same Bridge rather than installing a second copy. Portable Git-backed project knowledge supports continuity across AI projects and computers while protected contracts, execution grants, licence validation, and subscriber data remain on the CogentStack service.",
+    "displayName": "CogentSpec",
+    "shortDescription": "CogentSpec Web, one Bridge, isolated AI contexts.",
+    "longDescription": "CogentSpec keeps official ChatGPT, Codex, and Claude desktop applications independent and connects their isolated project contexts to CogentSpec Web through one account-bound Desktop Bridge. Invoking CogentSpec resolves the current stable project context, starts or reuses its quiet Bridge worker, and returns the exact web workspace link without opening a browser, creating tabs, inspecting unrelated pages, hiding sidebars, or resizing windows. Approved project creation, permanent deletion, and verified local-preview requests are queued by the hosted workspace and executed through narrow server-authoritative helpers. Qwen Desktop remains an optional CogentSpec-owned integrated local, cloud, and hybrid workspace and includes the same Bridge rather than installing a second copy. Portable Git-backed project knowledge supports continuity across AI projects and computers while protected contracts, execution grants, licence validation, and subscriber data remain on the CogentSpec service.",
     "developerName": "Paula",
     "category": "Productivity",
     "capabilities": [
       "Interactive"
     ],
-    "websiteURL": "https://cogentstack.app/",
+    "websiteURL": "https://cogentspec.com/",
     "defaultPrompt": [
-      "Connect this AI project to CogentStack Web.",
+      "Connect this AI project to CogentSpec Web.",
       "Load the active project's portable knowledge in this ChatGPT Project.",
-      "Return this project's isolated CogentStack Web link.",
+      "Return this project's isolated CogentSpec Web link.",
       "Build the approved project I describe in this composer.",
       "Generate or restart the active project's local preview.",
-      "Prepare the Deployment Pack I approved in CogentStack.",
-      "Delete the project I explicitly approved for deletion in CogentStack."
+      "Prepare the Deployment Pack I approved in CogentSpec.",
+      "Delete the project I explicitly approved for deletion in CogentSpec."
     ],
     "brandColor": "#087E6D",
     "composerIcon": "./assets/icon.png",

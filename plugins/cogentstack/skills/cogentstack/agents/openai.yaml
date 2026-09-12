@@ -1,4 +1,4 @@
 interface:
-  display_name: "CogentStack"
+  display_name: "CogentSpec"
   short_description: "Open, build, and safely manage projects"
-  default_prompt: "Use $cogentstack to open, build, or safely manage my approved CogentStack project."
+  default_prompt: "Use $cogentstack to open, build, or safely manage my approved CogentSpec project."

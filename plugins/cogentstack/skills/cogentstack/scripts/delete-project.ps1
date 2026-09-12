@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'project-context.ps1')
-$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
+$projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
 $contextQuery = "context=$([Uri]::EscapeDataString($projectContext.ContextKey))"
 
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
@@ -19,8 +19,8 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     }
 }
 
-$serviceUrl = 'https://cogentstack.app'
-$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentStack'
+$serviceUrl = 'https://cogentspec.com'
+$stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
 $previewWatcherRoot = Join-Path $stateRoot 'preview-watchers'
 
@@ -28,7 +28,7 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 8 -Compress | Write-Output
 }
 
-function Unprotect-CogentStackValue([string]$Value) {
+function Unprotect-CogentSpecValue([string]$Value) {
     $protected = [Convert]::FromBase64String($Value)
     $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
         $protected,
@@ -38,7 +38,7 @@ function Unprotect-CogentStackValue([string]$Value) {
     return [Text.Encoding]::UTF8.GetString($bytes)
 }
 
-function Invoke-CogentStackApi(
+function Invoke-CogentSpecApi(
     [string]$Method,
     [string]$Path,
     [string]$Token,
@@ -193,8 +193,8 @@ if (-not (Test-Path -LiteralPath $credentialPath)) {
 }
 
 $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
-$token = Unprotect-CogentStackValue ([string]$credential.token)
-$listing = Invoke-CogentStackApi -Method Get -Path "/api/plugin/project-deletions?$contextQuery" -Token $token
+$token = Unprotect-CogentSpecValue ([string]$credential.token)
+$listing = Invoke-CogentSpecApi -Method Get -Path "/api/plugin/project-deletions?$contextQuery" -Token $token
 $requests = @($listing.requests)
 
 if ($Mode -eq 'inspect') {
@@ -236,7 +236,7 @@ $folderRemoved = $false
 $processesStopped = 0
 
 try {
-    $claim = Invoke-CogentStackApi -Method Post -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
+    $claim = Invoke-CogentSpecApi -Method Post -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
         action = 'claim'
         requestId = $RequestId
     }
@@ -248,7 +248,7 @@ try {
         [string]::IsNullOrWhiteSpace([string]$claim.executionGrant) -or
         [string]$claim.deletionDigest -notmatch '^[0-9a-f]{64}$'
     ) {
-        throw 'CogentStack returned an incomplete project deletion claim.'
+        throw 'CogentSpec returned an incomplete project deletion claim.'
     }
     $claimed = $true
     $executionGrant = [string]$claim.executionGrant
@@ -278,7 +278,7 @@ try {
     $completed = $null
     for ($attempt = 1; $attempt -le 3 -and $null -eq $completed; $attempt++) {
         try {
-            $completed = Invoke-CogentStackApi -Method Patch -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
+            $completed = Invoke-CogentSpecApi -Method Patch -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
                 action = 'complete'
                 requestId = $RequestId
                 deletionDigest = $deletionDigest
@@ -286,7 +286,7 @@ try {
                 statusMessage = $completionMessage
             }
         } catch {
-            $remainingRequests = @((Invoke-CogentStackApi -Method Get -Path "/api/plugin/project-deletions?$contextQuery" -Token $token).requests)
+            $remainingRequests = @((Invoke-CogentSpecApi -Method Get -Path "/api/plugin/project-deletions?$contextQuery" -Token $token).requests)
             if (-not ($remainingRequests | Where-Object { [string]$_.id -eq $RequestId })) {
                 $completed = [pscustomobject]@{ status = 'deleted' }
                 break
@@ -296,7 +296,7 @@ try {
         }
     }
     if ([string]$completed.status -ne 'deleted') {
-        throw 'CogentStack did not confirm the project registration as deleted.'
+        throw 'CogentSpec did not confirm the project registration as deleted.'
     }
     Write-CompactJson ([ordered]@{
         status = 'deleted'
@@ -312,7 +312,7 @@ try {
     $message = $_.Exception.Message
     if ($claimed -and $executionGrant -and $deletionDigest) {
         try {
-            Invoke-CogentStackApi -Method Patch -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
+            Invoke-CogentSpecApi -Method Patch -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
                 action = 'fail'
                 requestId = $RequestId
                 deletionDigest = $deletionDigest

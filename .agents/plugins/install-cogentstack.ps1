@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 $protocol = 'trusted-marketplace-v3'
 $marketplaceName = 'cogentstack'
 $marketplaceSource = 'https://github.com/cogentspec/cogentspec-marketplace.git'
-$workspaceUrl = 'https://cogentstack.app/stack'
+$workspaceUrl = 'https://cogentspec.com/stack'
 $requiredSparsePaths = @('.agents/plugins', 'plugins/cogentstack')
 $timer = [Diagnostics.Stopwatch]::StartNew()
 $privateInstallationRequest = [string]$InstallationRequest
@@ -168,7 +168,7 @@ try {
         -MaximumRedirection 0 `
         -TimeoutSec $webTimeout
     if ([int]$response.StatusCode -ne 200) {
-        throw 'The CogentStack workspace did not return HTTP 200.'
+        throw 'The CogentSpec workspace did not return HTTP 200.'
     }
     $baseResponseProperties = @($response.BaseResponse.PSObject.Properties.Name)
     $finalUrl = if ($baseResponseProperties -contains 'RequestMessage' -and $response.BaseResponse.RequestMessage.RequestUri) {
@@ -179,27 +179,27 @@ try {
         $workspaceUrl
     }
     if ($finalUrl -ne $workspaceUrl) {
-        throw 'The CogentStack workspace redirected instead of returning the official web workspace.'
+        throw 'The CogentSpec workspace redirected instead of returning the official web workspace.'
     }
     if ($response.Content -notmatch 'Creating a project' -or $response.Content -notmatch 'Find a project type') {
-        throw 'The CogentStack workspace is missing a required project-creation marker.'
+        throw 'The CogentSpec workspace is missing a required project-creation marker.'
     }
     Complete-InstallStage
 
     Set-InstallStage -Name 'prepared_marketplace_verification'
     $marketplace = Get-MarketplaceState
     if (-not $marketplace -or -not (Test-Path -LiteralPath ([string]$marketplace.root))) {
-        throw 'The prepared CogentStack marketplace registration is unavailable.'
+        throw 'The prepared CogentSpec marketplace registration is unavailable.'
     }
     $marketplaceRoot = (Resolve-Path -LiteralPath ([string]$marketplace.root) -ErrorAction Stop).Path.TrimEnd('\', '/')
     $installerMarketplaceRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..') -ErrorAction Stop).Path.TrimEnd('\', '/')
     if (-not [string]::Equals($marketplaceRoot, $installerMarketplaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'The installer is not running from the prepared CogentStack marketplace.'
+        throw 'The installer is not running from the prepared CogentSpec marketplace.'
     }
     $preparedRemote = Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'remote', 'get-url', 'origin') -Operation 'marketplace remote verification'
     $preparedSparse = @((Invoke-BoundedNative -FilePath $gitPath -Arguments @('-C', $marketplaceRoot, 'sparse-checkout', 'list') -Operation 'marketplace sparse-path verification') -split "`r?`n" | Where-Object { $_ })
     if ($preparedRemote.Trim() -ne $marketplaceSource -or -not (Test-StringSetEqual -Actual $preparedSparse -Expected $requiredSparsePaths)) {
-        throw 'The prepared CogentStack marketplace does not match the official Git source and sparse paths.'
+        throw 'The prepared CogentSpec marketplace does not match the official Git source and sparse paths.'
     }
     Complete-InstallStage
 
@@ -208,7 +208,7 @@ try {
     $installResult = Read-JsonResult -Text $installJson -Operation 'Plugin installation'
     $installedPath = [string]$installResult.installedPath
     if (-not $installedPath -or -not (Test-Path -LiteralPath $installedPath)) {
-        throw 'The CogentStack plugin installation did not return a valid installed package path.'
+        throw 'The CogentSpec plugin installation did not return a valid installed package path.'
     }
     Complete-InstallStage
 
@@ -217,7 +217,7 @@ try {
     $pluginList = Read-JsonResult -Text $pluginListJson -Operation 'Installed plugin inspection'
     $installedPlugin = @($pluginList.installed | Where-Object { $_.pluginId -eq 'cogentstack@cogentstack' }) | Select-Object -First 1
     if (-not $installedPlugin -or -not [bool]$installedPlugin.installed -or -not [bool]$installedPlugin.enabled) {
-        throw 'The CogentStack plugin is not installed and enabled.'
+        throw 'The CogentSpec plugin is not installed and enabled.'
     }
     Complete-InstallStage
 
@@ -228,7 +228,7 @@ try {
     $sourceManifest = Get-Content -LiteralPath $sourceManifestPath -Raw | ConvertFrom-Json
     $installedManifest = Get-Content -LiteralPath $installedManifestPath -Raw | ConvertFrom-Json
     if ([string]$sourceManifest.version -ne [string]$installedManifest.version -or [string]$installedPlugin.version -ne [string]$sourceManifest.version) {
-        throw 'The installed CogentStack version does not match the prepared marketplace package.'
+        throw 'The installed CogentSpec version does not match the prepared marketplace package.'
     }
 
     $allowedFiles = @(
@@ -252,7 +252,7 @@ try {
         $_.FullName.Substring($installedPath.Length + 1).Replace('\', '/')
     })
     if (-not (Test-StringSetEqual -Actual $actualFiles -Expected $allowedFiles)) {
-        throw 'The installed CogentStack package does not match the official public-file allowlist.'
+        throw 'The installed CogentSpec package does not match the official public-file allowlist.'
     }
     foreach ($relativePath in $allowedFiles) {
         $nativeRelativePath = $relativePath.Replace('/', '\')
@@ -272,7 +272,7 @@ try {
         'This helper performs the one account-status check itself.',
         '`browserOpened: false`',
         'Do not open it, call a browser-control tool, create or select a browser tab',
-        'Qwen Desktop is an optional CogentStack-owned integrated application and includes the same Bridge',
+        'Qwen Desktop is an optional CogentSpec-owned integrated application and includes the same Bridge',
         'queues `create_project` for Desktop Bridge',
         'queues `preview_project` for Desktop Bridge',
         'queues `delete_project` immediately'

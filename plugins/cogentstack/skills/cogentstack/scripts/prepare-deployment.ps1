@@ -1,15 +1,15 @@
 param([ValidateSet("inspect", "prepare")][string]$Mode = "prepare", [string]$RequestId = "", [string]$ContextKey = "")
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'project-context.ps1')
-$projectContext = Get-CogentStackProjectContext -ExplicitContextKey $ContextKey
-$BaseUrl = "https://cogentstack.app"
-$CredentialPath = Join-Path $env:LOCALAPPDATA "CogentStack\desktop-credential.json"
+$projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
+$BaseUrl = "https://cogentspec.com"
+$CredentialPath = Join-Path $env:LOCALAPPDATA "CogentSpec\desktop-credential.json"
 
 function Read-Credential {
-  if (-not (Test-Path -LiteralPath $CredentialPath -PathType Leaf)) { throw "CogentStack Desktop is not connected." }
+  if (-not (Test-Path -LiteralPath $CredentialPath -PathType Leaf)) { throw "CogentSpec Desktop is not connected." }
   $stored = Get-Content -LiteralPath $CredentialPath -Raw | ConvertFrom-Json
   $token = [System.Net.NetworkCredential]::new("", (ConvertTo-SecureString ([string]$stored.protectedToken))).Password
-  if ([string]::IsNullOrWhiteSpace($token)) { throw "CogentStack Desktop credential is empty." }
+  if ([string]::IsNullOrWhiteSpace($token)) { throw "CogentSpec Desktop credential is empty." }
   return $token
 }
 
