@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 
 $protocol = 'trusted-marketplace-v3'
 $marketplaceName = 'cogentstack'
-$marketplaceSource = 'https://github.com/Paulanthonydutton/cogentstack-marketplace.git'
+$marketplaceSource = 'https://github.com/cogentspec/cogentspec-marketplace.git'
 $workspaceUrl = 'https://cogentstack.app/stack'
 $requiredSparsePaths = @('.agents/plugins', 'plugins/cogentstack')
 $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -181,7 +181,7 @@ try {
     if ($finalUrl -ne $workspaceUrl) {
         throw 'The CogentStack workspace redirected instead of returning the official web workspace.'
     }
-    if ($response.Content -notmatch 'Creating a Project:' -or $response.Content -notmatch 'Find a project type') {
+    if ($response.Content -notmatch 'Creating a project' -or $response.Content -notmatch 'Find a project type') {
         throw 'The CogentStack workspace is missing a required project-creation marker.'
     }
     Complete-InstallStage
@@ -268,7 +268,7 @@ try {
     $skillText = Get-Content -LiteralPath (Join-Path $installedPath 'skills\cogentstack\SKILL.md') -Raw
     $requiredSkillStatements = @(
         'Run `scripts/project-context.ps1` exactly once',
-        'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context>` exactly once.',
+        'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once.',
         'This helper performs the one account-status check itself.',
         '`browserOpened: false`',
         'Do not open it, call a browser-control tool, create or select a browser tab',

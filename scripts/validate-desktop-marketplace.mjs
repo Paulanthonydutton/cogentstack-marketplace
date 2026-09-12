@@ -23,7 +23,7 @@ if (!semver.test(manifest.minimumSupportedVersion ?? "")) fail("minimumSupported
 
 const expectedTag = `desktop-v${manifest.latestVersion}`;
 if (manifest.releaseTag !== expectedTag) fail(`releaseTag must be ${expectedTag}`);
-if (manifest.releasePageUrl !== `https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/${expectedTag}`) {
+if (manifest.releasePageUrl !== `https://github.com/cogentspec/cogentspec-marketplace/releases/tag/${expectedTag}`) {
   fail("releasePageUrl must use the CogentStack Git marketplace release");
 }
 if (!Array.isArray(manifest.releaseNotes) || manifest.releaseNotes.length === 0 || manifest.releaseNotes.some((note) => typeof note !== "string" || !note.trim() || note.length > 240)) {
@@ -32,7 +32,7 @@ if (!Array.isArray(manifest.releaseNotes) || manifest.releaseNotes.length === 0 
 
 const windows = manifest.windows ?? {};
 const expectedFilename = `CogentStack-Desktop-${manifest.latestVersion}-x64-setup.exe`;
-const expectedInstallerUrl = `https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/${expectedTag}/${expectedFilename}`;
+const expectedInstallerUrl = `https://github.com/cogentspec/cogentspec-marketplace/releases/download/${expectedTag}/${expectedFilename}`;
 if (windows.architecture !== "x64") fail("the first Windows release must target x64");
 if (windows.installerUrl !== expectedInstallerUrl) fail("installerUrl must be the versioned GitHub Release asset");
 if (!sha256.test(windows.installerSha256 ?? "")) fail("installerSha256 must be a lowercase SHA-256 digest");

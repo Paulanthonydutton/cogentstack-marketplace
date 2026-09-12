@@ -9,11 +9,10 @@
       "trustLevel": "example",
       "status": "example",
       "source": {
-        "repository": "https://github.com/Paulanthonydutton/cogentstack-marketplace",
+        "repository": "https://github.com/cogentspec/cogentspec-marketplace",
         "path": "contracts/examples/accessible-interface",
         "revision": "WORKTREE"
       }
     }
   ]
 }
-

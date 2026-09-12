@@ -5,7 +5,7 @@
   "latestVersion": "0.1.16",
   "minimumSupportedVersion": "0.1.1",
   "releaseTag": "desktop-v0.1.16",
-  "releasePageUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/tag/desktop-v0.1.16",
+  "releasePageUrl": "https://github.com/cogentspec/cogentspec-marketplace/releases/tag/desktop-v0.1.16",
   "releaseNotes": [
     "Removes the duplicated right-pane title band so the CogentStack workspace begins directly below the main Desktop toolbar.",
     "Gives the embedded contract workspace the full remaining right-pane height while preserving the adjustable split view.",
@@ -13,7 +13,7 @@
   ],
   "windows": {
     "architecture": "x64",
-    "installerUrl": "https://github.com/Paulanthonydutton/cogentstack-marketplace/releases/download/desktop-v0.1.16/CogentStack-Desktop-0.1.16-x64-setup.exe",
+    "installerUrl": "https://github.com/cogentspec/cogentspec-marketplace/releases/download/desktop-v0.1.16/CogentStack-Desktop-0.1.16-x64-setup.exe",
     "installerSha256": "a61961e5995850049f8615a4dcecc614bb25ed26f35d1588691a3debe068e59c",
     "installerSizeBytes": 57865017,
     "authenticodeSigned": false,

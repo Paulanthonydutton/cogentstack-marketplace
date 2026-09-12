@@ -82,7 +82,7 @@ exit 2
     $gitStub = @"
 @echo off
 if "%~3"=="remote" (
-  echo https://github.com/Paulanthonydutton/cogentstack-marketplace.git
+  echo https://github.com/cogentspec/cogentspec-marketplace.git
   exit /b 0
 )
 if "%~3"=="sparse-checkout" (
@@ -102,7 +102,7 @@ exit /b 2
     $validRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference
     $valid = $validRun.result
 
-    Assert-InstallerTest ($validRun.exitCode -eq 0) 'The isolated v3 installer validation returned a non-zero exit code.'
+    Assert-InstallerTest ($validRun.exitCode -eq 0) ("The isolated v3 installer validation returned a non-zero exit code: {0}" -f ($valid | ConvertTo-Json -Compress -Depth 5))
     Assert-InstallerTest ([string]$valid.protocol -eq 'trusted-marketplace-v3') 'The isolated installer returned the wrong protocol.'
     Assert-InstallerTest ([string]$valid.status -eq 'validated') 'The isolated installer did not complete validation.'
     Assert-InstallerTest ([bool]$valid.installerStarted) 'The installer did not report that its process started.'
