@@ -92,3 +92,12 @@ function Add-CogentSpecContextToPath([string]$Path, [string]$ContextKey) {
     $separator = if ($Path.Contains('?')) { '&' } else { '?' }
     return "$Path${separator}context=$([Uri]::EscapeDataString($ContextKey))"
 }
+
+if ($MyInvocation.InvocationName -ne '.') {
+    $resolvedContext = Get-CogentSpecProjectContext
+    [ordered]@{
+        contextKey = [string]$resolvedContext.ContextKey
+        source = [string]$resolvedContext.Source
+        isolated = [bool]$resolvedContext.Isolated
+    } | ConvertTo-Json -Compress | Write-Output
+}
