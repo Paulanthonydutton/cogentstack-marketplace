@@ -19,13 +19,19 @@ function Invoke-InstallerFixture {
         [Parameter(Mandatory = $true)][string]$PowerShellPath,
         [Parameter(Mandatory = $true)][string]$InstallerPath,
         [Parameter(Mandatory = $true)][string]$Reference,
+        [switch]$ValidateOnly,
         [int]$TimeoutSeconds = 120
     )
-    $output = @(& $PowerShellPath -NoProfile -ExecutionPolicy Bypass -File $InstallerPath `
-        -InstallationRequest $Reference `
-        -MarketplacePrepared `
-        -InstallerTimeoutSeconds $TimeoutSeconds `
-        -ValidateOnly 2>&1)
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $InstallerPath,
+        '-InstallationRequest', $Reference,
+        '-MarketplacePrepared',
+        '-InstallerTimeoutSeconds', $TimeoutSeconds
+    )
+    if ($ValidateOnly) { $arguments += '-ValidateOnly' }
+    $output = @(& $PowerShellPath @arguments 2>&1)
     return [ordered]@{
         exitCode = $LASTEXITCODE
         result = ($output[-1].ToString() | ConvertFrom-Json)
@@ -47,6 +53,22 @@ try {
     [void](New-Item -ItemType Directory -Path $fixtureBin -Force)
     Copy-Item -LiteralPath (Join-Path $repositoryRoot '.agents\plugins\install-cogentspec.ps1') -Destination $fixtureInstallerDirectory
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec') -Destination $fixturePlugin -Recurse -Force
+
+    $claimFixture = @'
+param(
+    [string]$Mode,
+    [string]$InstallationRequest
+)
+if ($Mode -ne 'claim' -or $InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,}$') {
+    throw 'Unexpected account-bound claim fixture invocation.'
+}
+[ordered]@{
+    status = 'connected'
+    accountBound = $true
+    installationBound = $true
+} | ConvertTo-Json -Compress
+'@
+    Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\connect-cogentstack.ps1') -Value $claimFixture -Encoding UTF8
 
     $pluginManifest = Get-Content -LiteralPath (Join-Path $fixturePlugin '.codex-plugin\plugin.json') -Raw | ConvertFrom-Json
     $escapedMarketplace = $fixtureMarketplace.Replace("'", "''")
@@ -100,7 +122,7 @@ exit /b 2
     $powerShellPath = (Get-Process -Id $PID).Path
     $installerPath = Join-Path $fixtureInstallerDirectory 'install-cogentspec.ps1'
     $validReference = 'cgb_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-    $validRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference
+    $validRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -ValidateOnly
     $valid = $validRun.result
 
     Assert-InstallerTest ($validRun.exitCode -eq 0) ("The isolated v3 installer validation returned a non-zero exit code: {0}" -f ($valid | ConvertTo-Json -Compress -Depth 5))
@@ -118,6 +140,16 @@ exit /b 2
     Assert-InstallerTest ($completedStageNames -contains 'package_integrity_verification') 'The package integrity stage was not evidenced.'
     Assert-InstallerTest ($completedStageNames -contains 'launcher_contract_verification') 'The launcher verification stage was not evidenced.'
 
+    $claimRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference
+    $claim = $claimRun.result
+    Assert-InstallerTest ($claimRun.exitCode -eq 0) ("The isolated v3 claim fixture returned a non-zero exit code: {0}" -f ($claim | ConvertTo-Json -Compress -Depth 5))
+    Assert-InstallerTest ([string]$claim.status -eq 'installed') 'The isolated claim fixture did not complete installation.'
+    Assert-InstallerTest ([bool]$claim.claimAttempted) 'The isolated claim fixture did not attempt its local claim helper.'
+    Assert-InstallerTest ([bool]$claim.accountRequestConsumed) 'The isolated claim fixture did not report consumption.'
+    Assert-InstallerTest ([bool]$claim.connected -and [bool]$claim.accountBound -and [bool]$claim.installationBound) 'The isolated claim fixture did not return all connection guarantees.'
+    $claimStageNames = @($claim.completedStages | ForEach-Object { [string]$_.stage })
+    Assert-InstallerTest ($claimStageNames -contains 'account_bound_claim') 'The isolated claim fixture did not complete the account-bound claim stage.'
+
     $invalidRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference 'missing'
     $invalid = $invalidRun.result
     Assert-InstallerTest ($invalidRun.exitCode -ne 0) 'An invalid current-message reference unexpectedly succeeded.'
@@ -132,7 +164,7 @@ exit /b 2
     if ($ExerciseTimeout) {
         $env:COGENTSPEC_INSTALLER_TEST_STALL = '1'
         try {
-            $timeoutRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -TimeoutSeconds 30
+            $timeoutRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -ValidateOnly -TimeoutSeconds 30
         } finally {
             Remove-Item Env:\COGENTSPEC_INSTALLER_TEST_STALL -ErrorAction SilentlyContinue
         }
@@ -159,6 +191,7 @@ exit /b 2
         nativeCommandsCompleted = [int]$valid.nativeCommandsCompleted
         completedStages = $completedStageNames
         invalidReferenceRejectedBeforeCommands = $true
+        claimPathCasePassed = $true
         timeoutCasePassed = $timeoutCasePassed
         timeoutElapsedMs = $timeoutElapsedMs
         claimAttempted = $false

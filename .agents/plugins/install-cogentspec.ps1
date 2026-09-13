@@ -324,7 +324,7 @@ try {
     if ($remainingForClaim -lt 5000) {
         throw 'The running installer did not leave at least five seconds to begin the account-bound claim safely.'
     }
-    $connectScript = Join-Path $installedPath 'skills\cogentstack\scripts\connect-cogentstack.ps1'
+    $connectScript = Join-Path $installedPath 'skills\cogentspec\scripts\connect-cogentstack.ps1'
     $claimJob = Start-Job -ScriptBlock {
         param($ConnectionHelper, $PrivateRequest)
         & $ConnectionHelper -Mode claim -InstallationRequest $PrivateRequest
